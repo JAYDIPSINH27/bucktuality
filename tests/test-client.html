@@ -10,7 +10,7 @@
             margin: 40px;
         }
 
-        input {
+        input, select {
             margin: 5px;
             padding: 6px;
         }
@@ -51,6 +51,11 @@
     <input id="userId" readonly style="width:450px;">
 </div>
 
+<div>
+    <label>Partner User ID:</label>
+    <input id="partnerUserId" readonly style="width:450px;">
+</div>
+
 <button onclick="createAnonymousUser()">Create Anonymous User</button>
 <button onclick="connect()">Connect</button>
 <button onclick="startMatching()">Start Matching</button>
@@ -68,6 +73,21 @@
 
     <button onclick="sendMessage()">Send</button>
     <button onclick="leaveRoom()">Leave Room</button>
+</div>
+
+<hr>
+
+<div>
+    <label>Report Reason:</label>
+    <select id="reportReason">
+        <option value="spam">Spam</option>
+        <option value="harassment">Harassment</option>
+        <option value="inappropriate">Inappropriate Content</option>
+        <option value="abusive-language">Abusive Language</option>
+        <option value="other">Other</option>
+    </select>
+
+    <button onclick="reportUser()">Report Partner</button>
 </div>
 
 <h2>Logs</h2>
@@ -155,6 +175,7 @@
             });
 
             document.getElementById("roomId").value = data.roomId;
+            document.getElementById("partnerUserId").value = data.partnerUserId || "";
         });
 
         connection.on("ReceiveMessage", data => {
@@ -171,6 +192,8 @@
             });
 
             document.getElementById("roomId").value = "";
+            document.getElementById("partnerUserId").value = "";
+
             alert("Your partner left the room.");
         });
 
@@ -181,6 +204,7 @@
             });
 
             document.getElementById("roomId").value = "";
+            document.getElementById("partnerUserId").value = "";
             document.getElementById("message").value = "";
         });
 
@@ -289,10 +313,62 @@
             });
 
             document.getElementById("roomId").value = "";
+            document.getElementById("partnerUserId").value = "";
             document.getElementById("message").value = "";
         } catch (err) {
             log({
                 event: "LeaveRoomError",
+                error: err.toString()
+            });
+        }
+    }
+
+    async function reportUser() {
+        const roomId = document.getElementById("roomId").value.trim();
+        const reporterUserId = document.getElementById("userId").value.trim();
+        const reportedUserId = document.getElementById("partnerUserId").value.trim();
+        const reason = document.getElementById("reportReason").value;
+
+        if (!roomId) {
+            alert("No active room.");
+            return;
+        }
+
+        if (!reportedUserId) {
+            alert("No partner to report.");
+            return;
+        }
+
+        try {
+            const response = await fetch("http://localhost:5012/reports", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    roomId,
+                    reporterUserId,
+                    reportedUserId,
+                    reason
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to report user");
+            }
+
+            const report = await response.json();
+
+            log({
+                event: "UserReported",
+                data: report
+            });
+
+            alert("Report submitted.");
+
+        } catch (err) {
+            log({
+                event: "ReportUserError",
                 error: err.toString()
             });
         }

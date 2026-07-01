@@ -1,0 +1,6 @@
+@Bucktuality.ModerationService_HostAddress = http://localhost:5122
+
+GET {{Bucktuality.ModerationService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

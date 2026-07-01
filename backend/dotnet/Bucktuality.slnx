@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Bucktuality.Gateway/Bucktuality.Gateway.csproj" />
+  <Project Path="Bucktuality.ModerationService/Bucktuality.ModerationService.csproj" />
   <Project Path="Bucktuality.RealtimeService/Bucktuality.RealtimeService.csproj" />
   <Project Path="Bucktuality.SessionService/Bucktuality.SessionService.csproj" />
   <Project Path="Bucktuality.Shared/Bucktuality.Shared.csproj" />

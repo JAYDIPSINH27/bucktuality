@@ -5,6 +5,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSignalR();
 
+builder.Services.AddSingleton<KafkaProducerService>();
+
 builder.Services.AddHttpClient<MatchmakingClient>(client =>
 {
     client.BaseAddress = new Uri(

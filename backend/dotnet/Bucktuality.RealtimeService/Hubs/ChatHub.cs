@@ -9,14 +9,18 @@ public class ChatHub : Hub
     private readonly MatchmakingClient _matchmakingClient;
     private readonly SessionClient _sessionClient;
 
+    private readonly KafkaProducerService _kafkaProducer;
+
     private static readonly Dictionary<string, string> ConnectionRooms = new();
 
     public ChatHub(
         MatchmakingClient matchmakingClient,
-        SessionClient sessionClient)
+        SessionClient sessionClient,
+        KafkaProducerService kafkaProducer)
     {
         _matchmakingClient = matchmakingClient;
         _sessionClient = sessionClient;
+        _kafkaProducer = kafkaProducer;
     }
 
     public override async Task OnConnectedAsync()
@@ -125,6 +129,14 @@ public class ChatHub : Hub
             User2Id = result.PartnerUserId ?? "unknown"
         });
 
+        await _kafkaProducer.PublishAsync("match-created", new MatchCreatedEvent
+        {
+            RoomId = roomId,
+            User1Id = userId,
+            User2Id = result.PartnerUserId ?? "unknown",
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
         await Clients.Client(Context.ConnectionId).SendAsync("MatchFound", result);
 
         if (!string.IsNullOrWhiteSpace(result.PartnerConnectionId))
@@ -156,6 +168,13 @@ public class ChatHub : Hub
         };
 
         await Clients.Group(roomId).SendAsync("ReceiveMessage", chatMessage);
+
+        await _kafkaProducer.PublishAsync("message-sent", new MessageSentEvent
+        {
+            RoomId = roomId,
+            SenderUserId = userId,
+            SentAtUtc = DateTime.UtcNow
+        });
     }
 
     public async Task LeaveRoom(string roomId)

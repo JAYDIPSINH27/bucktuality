@@ -2,30 +2,31 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Bucktuality Test Client</title>
+    <title>Bucktuality Video Test</title>
 
     <style>
         body {
             font-family: Arial, Helvetica, sans-serif;
-            margin: 40px;
+            margin: 30px;
         }
 
-        input, select {
+        input, select, button {
             margin: 5px;
-            padding: 6px;
+            padding: 8px;
         }
 
-        button {
-            margin: 5px;
-            padding: 8px 12px;
+        video {
+            width: 360px;
+            height: 260px;
+            background: #111;
+            margin: 10px;
         }
 
         #logs {
-            margin-top: 20px;
             background: #111;
             color: #00ff00;
             padding: 15px;
-            height: 350px;
+            height: 280px;
             overflow-y: auto;
             white-space: pre-wrap;
         }
@@ -34,7 +35,7 @@
 
 <body>
 
-<h1>Bucktuality Test Client</h1>
+<h1>Bucktuality Video Test Client</h1>
 
 <div>
     <label>Display Name:</label>
@@ -58,6 +59,7 @@
 
 <button onclick="createAnonymousUser()">Create Anonymous User</button>
 <button onclick="connect()">Connect</button>
+<button onclick="startCamera()">Start Camera</button>
 <button onclick="startMatching()">Start Matching</button>
 
 <hr>
@@ -68,9 +70,12 @@
 </div>
 
 <div>
-    <label>Message:</label>
-    <input id="message" placeholder="Type message">
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+</div>
 
+<div>
+    <input id="message" placeholder="Type message">
     <button onclick="sendMessage()">Send</button>
     <button onclick="leaveRoom()">Leave Room</button>
 </div>
@@ -96,283 +101,275 @@
 <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
 
 <script>
-    let connection = null;
+let connection = null;
+let peerConnection = null;
+let localStream = null;
+let isOfferCreator = false;
 
-    function log(message) {
-        const logs = document.getElementById("logs");
-        const time = new Date().toLocaleTimeString();
+function log(message) {
+    const logs = document.getElementById("logs");
+    const time = new Date().toLocaleTimeString();
+    logs.textContent += `[${time}] ${JSON.stringify(message, null, 2)}\n\n`;
+    logs.scrollTop = logs.scrollHeight;
+}
 
-        logs.textContent += `[${time}] ${JSON.stringify(message, null, 2)}\n\n`;
-        logs.scrollTop = logs.scrollHeight;
+async function createAnonymousUser() {
+    const displayName = document.getElementById("displayName").value.trim();
+    const vibe = document.getElementById("vibe").value.trim();
+
+    const response = await fetch("http://localhost:5010/users/anonymous", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ displayName, vibe })
+    });
+
+    const user = await response.json();
+
+    document.getElementById("userId").value = user.userId;
+
+    log({
+        event: "AnonymousUserCreated",
+        data: user
+    });
+}
+
+async function connect() {
+    connection = new signalR.HubConnectionBuilder()
+        .withUrl("http://localhost:5005/chatHub")
+        .withAutomaticReconnect()
+        .build();
+
+    connection.on("Connected", data => {
+        log({ event: "Connected", data });
+    });
+
+    connection.on("WaitingForMatch", data => {
+        log({ event: "WaitingForMatch", data });
+    });
+
+    connection.on("MatchFound", async data => {
+        log({ event: "MatchFound", data });
+
+        document.getElementById("roomId").value = data.roomId;
+        document.getElementById("partnerUserId").value = data.partnerUserId || "";
+
+        await createPeerConnection();
+
+        // Only the second matched user creates the offer.
+        isOfferCreator = true;
+        await createAndSendOffer();
+    });
+
+    connection.on("ReceiveMessage", data => {
+        log({ event: "ReceiveMessage", data });
+    });
+
+    connection.on("ReceiveOffer", async data => {
+        log({ event: "ReceiveOffer" });
+
+        await createPeerConnection();
+
+        const offer = JSON.parse(data.offer);
+
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+        const answer = await peerConnection.createAnswer();
+
+        await peerConnection.setLocalDescription(answer);
+
+        const roomId = document.getElementById("roomId").value;
+
+        await connection.invoke("SendAnswer", roomId, JSON.stringify(answer));
+    });
+
+    connection.on("ReceiveAnswer", async data => {
+        log({ event: "ReceiveAnswer" });
+
+        const answer = JSON.parse(data.answer);
+
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    connection.on("ReceiveIceCandidate", async data => {
+        log({ event: "ReceiveIceCandidate" });
+
+        const candidate = JSON.parse(data.candidate);
+
+        if (peerConnection) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+    });
+
+    connection.on("PartnerLeft", data => {
+        log({ event: "PartnerLeft", data });
+        cleanupCall();
+        document.getElementById("roomId").value = "";
+        document.getElementById("partnerUserId").value = "";
+    });
+
+    connection.on("LeftRoom", data => {
+        log({ event: "LeftRoom", data });
+        cleanupCall();
+        document.getElementById("roomId").value = "";
+        document.getElementById("partnerUserId").value = "";
+    });
+
+    connection.on("MatchError", data => {
+        log({ event: "MatchError", data });
+    });
+
+    await connection.start();
+
+    log("SignalR connected successfully.");
+}
+
+async function startCamera() {
+    localStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+    });
+
+    document.getElementById("localVideo").srcObject = localStream;
+
+    log("Camera started.");
+}
+
+async function createPeerConnection() {
+    if (peerConnection) {
+        return;
     }
 
-    async function createAnonymousUser() {
-        const displayName = document.getElementById("displayName").value.trim();
-        const vibe = document.getElementById("vibe").value.trim();
-
-        try {
-            const response = await fetch("http://localhost:5010/users/anonymous", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    displayName,
-                    vibe
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error("Failed to create user");
+    peerConnection = new RTCPeerConnection({
+        iceServers: [
+            {
+                urls: "stun:stun.l.google.com:19302"
             }
+        ]
+    });
 
-            const user = await response.json();
+    peerConnection.onicecandidate = async event => {
+        if (event.candidate) {
+            const roomId = document.getElementById("roomId").value;
 
-            document.getElementById("userId").value = user.userId;
-
-            log({
-                event: "AnonymousUserCreated",
-                data: user
-            });
-
-        } catch (err) {
-            log({
-                event: "CreateUserError",
-                error: err.toString()
-            });
+            await connection.invoke(
+                "SendIceCandidate",
+                roomId,
+                JSON.stringify(event.candidate)
+            );
         }
+    };
+
+    peerConnection.ontrack = event => {
+        document.getElementById("remoteVideo").srcObject = event.streams[0];
+
+        log("Remote stream received.");
+    };
+
+    if (!localStream) {
+        await startCamera();
     }
 
-    async function connect() {
-        if (connection && connection.state === signalR.HubConnectionState.Connected) {
-            log("Already connected.");
-            return;
-        }
+    localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+    });
 
-        connection = new signalR.HubConnectionBuilder()
-            .withUrl("http://localhost:5005/chatHub")
-            .withAutomaticReconnect()
-            .build();
+    log("Peer connection created.");
+}
 
-        connection.on("Connected", data => {
-            log({
-                event: "Connected",
-                data
-            });
-        });
+async function createAndSendOffer() {
+    const roomId = document.getElementById("roomId").value;
 
-        connection.on("WaitingForMatch", data => {
-            log({
-                event: "WaitingForMatch",
-                data
-            });
-        });
+    const offer = await peerConnection.createOffer();
 
-        connection.on("MatchFound", data => {
-            log({
-                event: "MatchFound",
-                data
-            });
+    await peerConnection.setLocalDescription(offer);
 
-            document.getElementById("roomId").value = data.roomId;
-            document.getElementById("partnerUserId").value = data.partnerUserId || "";
-        });
+    await connection.invoke("SendOffer", roomId, JSON.stringify(offer));
 
-        connection.on("ReceiveMessage", data => {
-            log({
-                event: "ReceiveMessage",
-                data
-            });
-        });
+    log("Offer sent.");
+}
 
-        connection.on("PartnerLeft", data => {
-            log({
-                event: "PartnerLeft",
-                data
-            });
+async function startMatching() {
+    const userId = document.getElementById("userId").value.trim();
+    const vibe = document.getElementById("vibe").value.trim();
 
-            document.getElementById("roomId").value = "";
-            document.getElementById("partnerUserId").value = "";
-
-            alert("Your partner left the room.");
-        });
-
-        connection.on("LeftRoom", data => {
-            log({
-                event: "LeftRoom",
-                data
-            });
-
-            document.getElementById("roomId").value = "";
-            document.getElementById("partnerUserId").value = "";
-            document.getElementById("message").value = "";
-        });
-
-        connection.on("MatchError", data => {
-            log({
-                event: "MatchError",
-                data
-            });
-        });
-
-        connection.onclose(error => {
-            log({
-                event: "Disconnected",
-                error: error ? error.toString() : null
-            });
-        });
-
-        try {
-            await connection.start();
-
-            log("SignalR connected successfully.");
-        } catch (err) {
-            log({
-                event: "ConnectionError",
-                error: err.toString()
-            });
-        }
+    if (!userId) {
+        alert("Create anonymous user first.");
+        return;
     }
 
-    async function startMatching() {
-        if (!connection || connection.state !== signalR.HubConnectionState.Connected) {
-            alert("Connect first.");
-            return;
-        }
+    await connection.invoke("StartMatching", userId, vibe);
 
-        const userId = document.getElementById("userId").value.trim();
-        const vibe = document.getElementById("vibe").value.trim();
+    log("StartMatching invoked.");
+}
 
-        if (!userId) {
-            alert("Create anonymous user first.");
-            return;
-        }
+async function sendMessage() {
+    const roomId = document.getElementById("roomId").value.trim();
+    const userId = document.getElementById("userId").value.trim();
+    const message = document.getElementById("message").value.trim();
 
-        try {
-            await connection.invoke("StartMatching", userId, vibe);
-
-            log("StartMatching invoked.");
-        } catch (err) {
-            log({
-                event: "StartMatchingError",
-                error: err.toString()
-            });
-        }
+    if (!roomId || !message) {
+        return;
     }
 
-    async function sendMessage() {
-        if (!connection || connection.state !== signalR.HubConnectionState.Connected) {
-            alert("Connect first.");
-            return;
-        }
+    await connection.invoke("SendMessage", roomId, userId, message);
 
-        const roomId = document.getElementById("roomId").value.trim();
-        const userId = document.getElementById("userId").value.trim();
-        const message = document.getElementById("message").value.trim();
+    document.getElementById("message").value = "";
+}
 
-        if (!roomId) {
-            alert("No room joined.");
-            return;
-        }
+async function leaveRoom() {
+    const roomId = document.getElementById("roomId").value.trim();
 
-        if (!message) {
-            return;
-        }
-
-        try {
-            await connection.invoke("SendMessage", roomId, userId, message);
-
-            document.getElementById("message").value = "";
-        } catch (err) {
-            log({
-                event: "SendMessageError",
-                error: err.toString()
-            });
-        }
+    if (!roomId) {
+        alert("No active room.");
+        return;
     }
 
-    async function leaveRoom() {
-        if (!connection || connection.state !== signalR.HubConnectionState.Connected) {
-            alert("Connect first.");
-            return;
-        }
+    await connection.invoke("LeaveRoom", roomId);
+}
 
-        const roomId = document.getElementById("roomId").value.trim();
+async function reportUser() {
+    const roomId = document.getElementById("roomId").value.trim();
+    const reporterUserId = document.getElementById("userId").value.trim();
+    const reportedUserId = document.getElementById("partnerUserId").value.trim();
+    const reason = document.getElementById("reportReason").value;
 
-        if (!roomId) {
-            alert("You are not currently in a room.");
-            return;
-        }
-
-        try {
-            await connection.invoke("LeaveRoom", roomId);
-
-            log({
-                event: "LeaveRoomInvoked",
-                roomId
-            });
-
-            document.getElementById("roomId").value = "";
-            document.getElementById("partnerUserId").value = "";
-            document.getElementById("message").value = "";
-        } catch (err) {
-            log({
-                event: "LeaveRoomError",
-                error: err.toString()
-            });
-        }
+    if (!roomId || !reportedUserId) {
+        alert("No partner to report.");
+        return;
     }
 
-    async function reportUser() {
-        const roomId = document.getElementById("roomId").value.trim();
-        const reporterUserId = document.getElementById("userId").value.trim();
-        const reportedUserId = document.getElementById("partnerUserId").value.trim();
-        const reason = document.getElementById("reportReason").value;
+    const response = await fetch("http://localhost:5012/reports", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            roomId,
+            reporterUserId,
+            reportedUserId,
+            reason
+            
+        })
+    });
 
-        if (!roomId) {
-            alert("No active room.");
-            return;
-        }
+    const report = await response.json();
 
-        if (!reportedUserId) {
-            alert("No partner to report.");
-            return;
-        }
+    log({
+        event: "UserReported",
+        data: report
+    });
+}
 
-        try {
-            const response = await fetch("http://localhost:5012/reports", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    roomId,
-                    reporterUserId,
-                    reportedUserId,
-                    reason
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error("Failed to report user");
-            }
-
-            const report = await response.json();
-
-            log({
-                event: "UserReported",
-                data: report
-            });
-
-            alert("Report submitted.");
-
-        } catch (err) {
-            log({
-                event: "ReportUserError",
-                error: err.toString()
-            });
-        }
+function cleanupCall() {
+    if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
     }
+
+    document.getElementById("remoteVideo").srcObject = null;
+}
 </script>
 
 </body>

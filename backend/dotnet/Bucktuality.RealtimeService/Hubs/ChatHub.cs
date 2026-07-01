@@ -187,4 +187,46 @@ public class ChatHub : Hub
             roomId
         });
     }
+
+    public async Task SendOffer(string roomId, string offer)
+{
+    if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(offer))
+    {
+        return;
+    }
+
+    await Clients.OthersInGroup(roomId).SendAsync("ReceiveOffer", new
+    {
+        roomId,
+        offer
+    });
+}
+
+public async Task SendAnswer(string roomId, string answer)
+{
+    if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(answer))
+    {
+        return;
+    }
+
+    await Clients.OthersInGroup(roomId).SendAsync("ReceiveAnswer", new
+    {
+        roomId,
+        answer
+    });
+}
+
+public async Task SendIceCandidate(string roomId, string candidate)
+{
+    if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(candidate))
+    {
+        return;
+    }
+
+    await Clients.OthersInGroup(roomId).SendAsync("ReceiveIceCandidate", new
+    {
+        roomId,
+        candidate
+    });
+}
 }

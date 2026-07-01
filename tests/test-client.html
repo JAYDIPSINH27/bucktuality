@@ -37,8 +37,8 @@
 <h1>Bucktuality Test Client</h1>
 
 <div>
-    <label>User ID:</label>
-    <input id="userId" placeholder="user1">
+    <label>Display Name:</label>
+    <input id="displayName" placeholder="Jay">
 </div>
 
 <div>
@@ -46,6 +46,12 @@
     <input id="vibe" value="banter">
 </div>
 
+<div>
+    <label>User ID:</label>
+    <input id="userId" readonly style="width:450px;">
+</div>
+
+<button onclick="createAnonymousUser()">Create Anonymous User</button>
 <button onclick="connect()">Connect</button>
 <button onclick="startMatching()">Start Matching</button>
 
@@ -78,6 +84,43 @@
 
         logs.textContent += `[${time}] ${JSON.stringify(message, null, 2)}\n\n`;
         logs.scrollTop = logs.scrollHeight;
+    }
+
+    async function createAnonymousUser() {
+        const displayName = document.getElementById("displayName").value.trim();
+        const vibe = document.getElementById("vibe").value.trim();
+
+        try {
+            const response = await fetch("http://localhost:5010/users/anonymous", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    displayName,
+                    vibe
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to create user");
+            }
+
+            const user = await response.json();
+
+            document.getElementById("userId").value = user.userId;
+
+            log({
+                event: "AnonymousUserCreated",
+                data: user
+            });
+
+        } catch (err) {
+            log({
+                event: "CreateUserError",
+                error: err.toString()
+            });
+        }
     }
 
     async function connect() {
@@ -177,7 +220,7 @@
         const vibe = document.getElementById("vibe").value.trim();
 
         if (!userId) {
-            alert("Enter user ID.");
+            alert("Create anonymous user first.");
             return;
         }
 

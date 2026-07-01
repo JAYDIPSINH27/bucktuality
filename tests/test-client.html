@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bucktuality Test Client</title>
+
+    <style>
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            margin: 40px;
+        }
+
+        input {
+            margin: 5px;
+            padding: 6px;
+        }
+
+        button {
+            margin: 5px;
+            padding: 8px 12px;
+        }
+
+        #logs {
+            margin-top: 20px;
+            background: #111;
+            color: #00ff00;
+            padding: 15px;
+            height: 350px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>Bucktuality Test Client</h1>
+
+<div>
+    <label>User ID:</label>
+    <input id="userId" placeholder="user1">
+</div>
+
+<div>
+    <label>Vibe:</label>
+    <input id="vibe" value="banter">
+</div>
+
+<button onclick="connect()">Connect</button>
+<button onclick="startMatching()">Start Matching</button>
+
+<hr>
+
+<div>
+    <label>Room ID:</label>
+    <input id="roomId" readonly style="width:450px;">
+</div>
+
+<div>
+    <label>Message:</label>
+    <input id="message" placeholder="Type message">
+
+    <button onclick="sendMessage()">Send</button>
+    <button onclick="leaveRoom()">Leave Room</button>
+</div>
+
+<h2>Logs</h2>
+<pre id="logs"></pre>
+
+<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+
+<script>
+    let connection = null;
+
+    function log(message) {
+        const logs = document.getElementById("logs");
+        const time = new Date().toLocaleTimeString();
+
+        logs.textContent += `[${time}] ${JSON.stringify(message, null, 2)}\n\n`;
+        logs.scrollTop = logs.scrollHeight;
+    }
+
+    async function connect() {
+        if (connection && connection.state === signalR.HubConnectionState.Connected) {
+            log("Already connected.");
+            return;
+        }
+
+        connection = new signalR.HubConnectionBuilder()
+            .withUrl("http://localhost:5005/chatHub")
+            .withAutomaticReconnect()
+            .build();
+
+        connection.on("Connected", data => {
+            log({
+                event: "Connected",
+                data
+            });
+        });
+
+        connection.on("WaitingForMatch", data => {
+            log({
+                event: "WaitingForMatch",
+                data
+            });
+        });
+
+        connection.on("MatchFound", data => {
+            log({
+                event: "MatchFound",
+                data
+            });
+
+            document.getElementById("roomId").value = data.roomId;
+        });
+
+        connection.on("ReceiveMessage", data => {
+            log({
+                event: "ReceiveMessage",
+                data
+            });
+        });
+
+        connection.on("PartnerLeft", data => {
+            log({
+                event: "PartnerLeft",
+                data
+            });
+
+            document.getElementById("roomId").value = "";
+            alert("Your partner left the room.");
+        });
+
+        connection.on("LeftRoom", data => {
+            log({
+                event: "LeftRoom",
+                data
+            });
+
+            document.getElementById("roomId").value = "";
+            document.getElementById("message").value = "";
+        });
+
+        connection.on("MatchError", data => {
+            log({
+                event: "MatchError",
+                data
+            });
+        });
+
+        connection.onclose(error => {
+            log({
+                event: "Disconnected",
+                error: error ? error.toString() : null
+            });
+        });
+
+        try {
+            await connection.start();
+
+            log("SignalR connected successfully.");
+        } catch (err) {
+            log({
+                event: "ConnectionError",
+                error: err.toString()
+            });
+        }
+    }
+
+    async function startMatching() {
+        if (!connection || connection.state !== signalR.HubConnectionState.Connected) {
+            alert("Connect first.");
+            return;
+        }
+
+        const userId = document.getElementById("userId").value.trim();
+        const vibe = document.getElementById("vibe").value.trim();
+
+        if (!userId) {
+            alert("Enter user ID.");
+            return;
+        }
+
+        try {
+            await connection.invoke("StartMatching", userId, vibe);
+
+            log("StartMatching invoked.");
+        } catch (err) {
+            log({
+                event: "StartMatchingError",
+                error: err.toString()
+            });
+        }
+    }
+
+    async function sendMessage() {
+        if (!connection || connection.state !== signalR.HubConnectionState.Connected) {
+            alert("Connect first.");
+            return;
+        }
+
+        const roomId = document.getElementById("roomId").value.trim();
+        const userId = document.getElementById("userId").value.trim();
+        const message = document.getElementById("message").value.trim();
+
+        if (!roomId) {
+            alert("No room joined.");
+            return;
+        }
+
+        if (!message) {
+            return;
+        }
+
+        try {
+            await connection.invoke("SendMessage", roomId, userId, message);
+
+            document.getElementById("message").value = "";
+        } catch (err) {
+            log({
+                event: "SendMessageError",
+                error: err.toString()
+            });
+        }
+    }
+
+    async function leaveRoom() {
+        if (!connection || connection.state !== signalR.HubConnectionState.Connected) {
+            alert("Connect first.");
+            return;
+        }
+
+        const roomId = document.getElementById("roomId").value.trim();
+
+        if (!roomId) {
+            alert("You are not currently in a room.");
+            return;
+        }
+
+        try {
+            await connection.invoke("LeaveRoom", roomId);
+
+            log({
+                event: "LeaveRoomInvoked",
+                roomId
+            });
+
+            document.getElementById("roomId").value = "";
+            document.getElementById("message").value = "";
+        } catch (err) {
+            log({
+                event: "LeaveRoomError",
+                error: err.toString()
+            });
+        }
+    }
+</script>
+
+</body>
+</html>

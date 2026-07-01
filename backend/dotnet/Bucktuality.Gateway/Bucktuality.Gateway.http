@@ -1,0 +1,6 @@
+@Bucktuality.Gateway_HostAddress = http://localhost:5166
+
+GET {{Bucktuality.Gateway_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

@@ -4,7 +4,8 @@ import (
 	"context"
 	"net/http"
 	"os"
-
+	"time"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -29,9 +30,7 @@ type MatchResponse struct {
 func main() {
 	redisAddress := getEnv("REDIS_ADDRESS", "localhost:6379")
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr: redisAddress,
-	})
+	rdb := connectRedis(redisAddress)
 
 	router := gin.Default()
 
@@ -143,6 +142,26 @@ func main() {
 	})
 
 	router.Run(":8081")
+}
+
+func connectRedis(address string) *redis.Client {
+	var client *redis.Client
+
+	for {
+		client = redis.NewClient(&redis.Options{
+			Addr: address,
+		})
+
+		err := client.Ping(ctx).Err()
+
+		if err == nil {
+			fmt.Println("Connected to Redis.")
+			return client
+		}
+
+		fmt.Println("Redis not ready, retrying in 3 seconds...")
+		time.Sleep(3 * time.Second)
+	}
 }
 
 func getEnv(key string, fallback string) string {

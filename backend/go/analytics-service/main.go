@@ -49,19 +49,7 @@ func main() {
 		"sqlserver://sa:Bucktuality@12345@localhost:1433?database=BucktualityAnalyticsDb&encrypt=disable",
 	)
 
-	var err error
-
-	db, err = sql.Open("sqlserver", connectionString)
-	if err != nil {
-		log.Fatal("Failed to open SQL connection:", err)
-	}
-
-	err = db.Ping()
-	if err != nil {
-		log.Fatal("Failed to connect to SQL Server:", err)
-	}
-
-	log.Println("Connected to SQL Server.")
+	db = connectSqlWithRetry(connectionString)
 
 	ctx := context.Background()
 
@@ -93,21 +81,63 @@ func main() {
 	router.Run(":8083")
 }
 
+func createKafkaReader(topic string, groupID string, broker string) *kafka.Reader {
+
+	for {
+
+		reader := kafka.NewReader(kafka.ReaderConfig{
+			Brokers:     []string{broker},
+			Topic:       topic,
+			GroupID:     groupID,
+			StartOffset: kafka.FirstOffset,
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+		_, err := reader.ReadLag(ctx)
+
+		cancel()
+
+		if err == nil {
+
+			log.Printf("Connected to Kafka. Topic=%s\n", topic)
+
+			return reader
+		}
+
+		log.Printf("Kafka not ready for topic %s. Retrying in 5 seconds...\n", topic)
+
+		reader.Close()
+
+		time.Sleep(5 * time.Second)
+	}
+}
+
 func consumeMatchCreated(ctx context.Context, broker string) {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     []string{broker},
-		Topic:       "match-created",
-		GroupID:     "analytics-match-created-group",
-		StartOffset: kafka.FirstOffset,
-	})
+	
+	reader := createKafkaReader(
+	"match-created",
+	"analytics-match-created-group",
+	broker,
+)
 
 	log.Println("Listening to topic: match-created")
 
 	for {
 		message, err := reader.ReadMessage(ctx)
+
 		if err != nil {
-			log.Println("Error reading match-created:", err)
-			time.Sleep(2 * time.Second)
+
+			log.Println("Kafka connection lost:", err)
+
+			reader.Close()
+
+			reader = createKafkaReader(
+				"match-created",
+				"analytics-match-created-group",
+				broker,
+			)
+
 			continue
 		}
 
@@ -130,23 +160,30 @@ func consumeMatchCreated(ctx context.Context, broker string) {
 }
 
 func consumeMessageSent(ctx context.Context, broker string) {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     []string{broker},
-		Topic:       "message-sent",
-		GroupID:     "analytics-message-sent-group",
-		StartOffset: kafka.FirstOffset,
-	})
-
+	reader := createKafkaReader(
+	"message-sent",
+	"analytics-message-sent-group",
+	broker,
+)
 	log.Println("Listening to topic: message-sent")
 
 	for {
 		message, err := reader.ReadMessage(ctx)
+
 		if err != nil {
-			log.Println("Error reading message-sent:", err)
-			time.Sleep(2 * time.Second)
+
+			log.Println("Kafka connection lost:", err)
+
+			reader.Close()
+
+			reader = createKafkaReader(
+				"message-sent",
+				"analytics-message-sent-group",
+				broker,
+			)
+
 			continue
 		}
-
 		var event MessageSentEvent
 
 		if err := json.Unmarshal(message.Value, &event); err != nil {
@@ -210,6 +247,24 @@ func getSummary() (AnalyticsSummary, error) {
 	)
 
 	return summary, err
+}
+
+func connectSqlWithRetry(connectionString string) *sql.DB {
+	for {
+		database, err := sql.Open("sqlserver", connectionString)
+
+		if err == nil {
+			err = database.Ping()
+
+			if err == nil {
+				log.Println("Connected to SQL Server.")
+				return database
+			}
+		}
+
+		log.Println("SQL Server not ready, retrying in 5 seconds...")
+		time.Sleep(5 * time.Second)
+	}
 }
 
 func getEnv(key string, fallback string) string {

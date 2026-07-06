@@ -21,6 +21,13 @@ builder.Services.AddHttpClient<SessionClient>(client =>
     );
 });
 
+builder.Services.AddHttpClient<PresenceClient>(client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["Services:Presence"] ?? "http://presence-service:8084"
+    );
+});
+
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>

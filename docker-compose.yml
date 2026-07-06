@@ -72,6 +72,7 @@ services:
       - session-service
       - moderation-service
       - analytics-service
+      - presence-service
 
   realtime-service:
     build:
@@ -84,6 +85,8 @@ services:
       matchmaking-service:
         condition: service_started
       session-service:
+        condition: service_started
+      presence-service:
         condition: service_started
       kafka:
         condition: service_healthy

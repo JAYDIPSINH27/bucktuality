@@ -8,19 +8,22 @@ public class ChatHub : Hub
 {
     private readonly MatchmakingClient _matchmakingClient;
     private readonly SessionClient _sessionClient;
-
     private readonly KafkaProducerService _kafkaProducer;
+    private readonly PresenceClient _presenceClient;
 
     private static readonly Dictionary<string, string> ConnectionRooms = new();
+    private static readonly Dictionary<string, string> ConnectionUsers = new();
 
     public ChatHub(
         MatchmakingClient matchmakingClient,
         SessionClient sessionClient,
-        KafkaProducerService kafkaProducer)
+        KafkaProducerService kafkaProducer,
+        PresenceClient presenceClient)
     {
         _matchmakingClient = matchmakingClient;
         _sessionClient = sessionClient;
         _kafkaProducer = kafkaProducer;
+        _presenceClient = presenceClient;
     }
 
     public override async Task OnConnectedAsync()
@@ -36,6 +39,7 @@ public class ChatHub : Hub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         string? roomId = null;
+        string? userId = null;
 
         lock (ConnectionRooms)
         {
@@ -44,6 +48,25 @@ public class ChatHub : Hub
                 roomId = existingRoomId;
                 ConnectionRooms.Remove(Context.ConnectionId);
             }
+        }
+
+        lock (ConnectionUsers)
+        {
+            if (ConnectionUsers.TryGetValue(Context.ConnectionId, out var existingUserId))
+            {
+                userId = existingUserId;
+                ConnectionUsers.Remove(Context.ConnectionId);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            await _presenceClient.SetOfflineAsync(new PresenceRequest
+            {
+                UserId = userId,
+                ConnectionId = Context.ConnectionId,
+                RoomId = roomId
+            });
         }
 
         await _matchmakingClient.LeaveMatchAsync(Context.ConnectionId, roomId);
@@ -73,6 +96,20 @@ public class ChatHub : Hub
 
             return;
         }
+
+        lock (ConnectionUsers)
+        {
+            ConnectionUsers[Context.ConnectionId] = userId;
+        }
+
+        await _presenceClient.SetStatusAsync(new PresenceRequest
+        {
+            UserId = userId,
+            ConnectionId = Context.ConnectionId,
+            Status = "waiting",
+            CameraOn = true,
+            MicOn = true
+        });
 
         var request = new MatchRequest
         {
@@ -137,6 +174,30 @@ public class ChatHub : Hub
             CreatedAtUtc = DateTime.UtcNow
         });
 
+        await _presenceClient.SetStatusAsync(new PresenceRequest
+        {
+            UserId = userId,
+            ConnectionId = Context.ConnectionId,
+            Status = "matched",
+            RoomId = roomId,
+            CameraOn = true,
+            MicOn = true
+        });
+
+        if (!string.IsNullOrWhiteSpace(result.PartnerUserId) &&
+            !string.IsNullOrWhiteSpace(result.PartnerConnectionId))
+        {
+            await _presenceClient.SetStatusAsync(new PresenceRequest
+            {
+                UserId = result.PartnerUserId,
+                ConnectionId = result.PartnerConnectionId,
+                Status = "matched",
+                RoomId = roomId,
+                CameraOn = true,
+                MicOn = true
+            });
+        }
+
         await Clients.Client(Context.ConnectionId).SendAsync("MatchFound", result);
 
         if (!string.IsNullOrWhiteSpace(result.PartnerConnectionId))
@@ -191,6 +252,26 @@ public class ChatHub : Hub
             ConnectionRooms.Remove(Context.ConnectionId);
         }
 
+        string? userId = null;
+
+        lock (ConnectionUsers)
+        {
+            ConnectionUsers.TryGetValue(Context.ConnectionId, out userId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            await _presenceClient.SetStatusAsync(new PresenceRequest
+            {
+                UserId = userId,
+                ConnectionId = Context.ConnectionId,
+                Status = "online",
+                RoomId = "",
+                CameraOn = true,
+                MicOn = true
+            });
+        }
+
         await _matchmakingClient.LeaveMatchAsync(Context.ConnectionId, roomId);
         await _sessionClient.EndSessionAsync(roomId);
 
@@ -208,44 +289,44 @@ public class ChatHub : Hub
     }
 
     public async Task SendOffer(string roomId, string offer)
-{
-    if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(offer))
     {
-        return;
+        if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(offer))
+        {
+            return;
+        }
+
+        await Clients.OthersInGroup(roomId).SendAsync("ReceiveOffer", new
+        {
+            roomId,
+            offer
+        });
     }
 
-    await Clients.OthersInGroup(roomId).SendAsync("ReceiveOffer", new
+    public async Task SendAnswer(string roomId, string answer)
     {
-        roomId,
-        offer
-    });
-}
+        if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(answer))
+        {
+            return;
+        }
 
-public async Task SendAnswer(string roomId, string answer)
-{
-    if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(answer))
-    {
-        return;
+        await Clients.OthersInGroup(roomId).SendAsync("ReceiveAnswer", new
+        {
+            roomId,
+            answer
+        });
     }
 
-    await Clients.OthersInGroup(roomId).SendAsync("ReceiveAnswer", new
+    public async Task SendIceCandidate(string roomId, string candidate)
     {
-        roomId,
-        answer
-    });
-}
+        if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(candidate))
+        {
+            return;
+        }
 
-public async Task SendIceCandidate(string roomId, string candidate)
-{
-    if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(candidate))
-    {
-        return;
+        await Clients.OthersInGroup(roomId).SendAsync("ReceiveIceCandidate", new
+        {
+            roomId,
+            candidate
+        });
     }
-
-    await Clients.OthersInGroup(roomId).SendAsync("ReceiveIceCandidate", new
-    {
-        roomId,
-        candidate
-    });
-}
 }

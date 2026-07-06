@@ -136,6 +136,7 @@ func main() {
 			"lastSeenUtc": time.Now().UTC().Format(time.RFC3339),
 		})
 
+		rdb.SAdd(ctx, "presence:online_users", req.UserId)
 		rdb.SRem(ctx, "presence:waiting_users", req.UserId)
 		rdb.SRem(ctx, "presence:matched_users", req.UserId)
 

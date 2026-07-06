@@ -2,40 +2,17 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Bucktuality Video Test</title>
-
+    <title>Bucktuality Full Test Client</title>
     <style>
-        body {
-            font-family: Arial, Helvetica, sans-serif;
-            margin: 30px;
-        }
-
-        input, select, button {
-            margin: 5px;
-            padding: 8px;
-        }
-
-        video {
-            width: 360px;
-            height: 260px;
-            background: #111;
-            margin: 10px;
-        }
-
-        #logs {
-            background: #111;
-            color: #00ff00;
-            padding: 15px;
-            height: 280px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-        }
+        body { font-family: Arial, Helvetica, sans-serif; margin: 30px; }
+        input, select, button { margin: 5px; padding: 8px; }
+        video { width: 360px; height: 260px; background: #111; margin: 10px; }
+        #logs { background: #111; color: #00ff00; padding: 15px; height: 300px; overflow-y: auto; white-space: pre-wrap; }
     </style>
 </head>
-
 <body>
 
-<h1>Bucktuality Video Test Client</h1>
+<h1>Bucktuality Full Test Client</h1>
 
 <div>
     <label>Display Name:</label>
@@ -49,24 +26,35 @@
 
 <div>
     <label>User ID:</label>
-    <input id="userId" readonly style="width:450px;">
+    <input id="userId" readonly style="width:500px;">
+</div>
+
+<div>
+    <label>Connection ID:</label>
+    <input id="connectionId" readonly style="width:500px;">
 </div>
 
 <div>
     <label>Partner User ID:</label>
-    <input id="partnerUserId" readonly style="width:450px;">
+    <input id="partnerUserId" readonly style="width:500px;">
+</div>
+
+<div>
+    <label>Partner Connection ID:</label>
+    <input id="partnerConnectionId" readonly style="width:500px;">
 </div>
 
 <button onclick="createAnonymousUser()">Create Anonymous User</button>
 <button onclick="connect()">Connect</button>
 <button onclick="startCamera()">Start Camera</button>
 <button onclick="startMatching()">Start Matching</button>
+<button onclick="leaveRoom()">Leave Room</button>
 
 <hr>
 
 <div>
     <label>Room ID:</label>
-    <input id="roomId" readonly style="width:450px;">
+    <input id="roomId" readonly style="width:500px;">
 </div>
 
 <div>
@@ -75,9 +63,8 @@
 </div>
 
 <div>
-    <input id="message" placeholder="Type message">
+    <input id="message" placeholder="Type message" style="width:350px;">
     <button onclick="sendMessage()">Send</button>
-    <button onclick="leaveRoom()">Leave Room</button>
 </div>
 
 <hr>
@@ -91,9 +78,13 @@
         <option value="abusive-language">Abusive Language</option>
         <option value="other">Other</option>
     </select>
-
     <button onclick="reportUser()">Report Partner</button>
 </div>
+
+<hr>
+
+<button onclick="getPresenceSummary()">Get Presence Summary</button>
+<button onclick="getAnalyticsSummary()">Get Analytics Summary</button>
 
 <h2>Logs</h2>
 <pre id="logs"></pre>
@@ -101,275 +92,447 @@
 <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
 
 <script>
-let connection = null;
-let peerConnection = null;
-let localStream = null;
-let isOfferCreator = false;
+    const USER_SERVICE = "http://localhost:5010";
+    const REALTIME_SERVICE = "http://localhost:5005";
+    const MODERATION_SERVICE = "http://localhost:5012";
+    const PRESENCE_SERVICE = "http://localhost:8084";
+    const ANALYTICS_SERVICE = "http://localhost:8083";
+    const API = "http://localhost:5000";
 
-function log(message) {
-    const logs = document.getElementById("logs");
-    const time = new Date().toLocaleTimeString();
-    logs.textContent += `[${time}] ${JSON.stringify(message, null, 2)}\n\n`;
-    logs.scrollTop = logs.scrollHeight;
-}
+    let connection = null;
+    let localStream = null;
+    let peerConnection = null;
+    let pendingIceCandidates = [];
 
-async function createAnonymousUser() {
-    const displayName = document.getElementById("displayName").value.trim();
-    const vibe = document.getElementById("vibe").value.trim();
+    function log(message) {
+        const logs = document.getElementById("logs");
+        const time = new Date().toLocaleTimeString();
+        logs.textContent += `[${time}] ${JSON.stringify(message, null, 2)}\n\n`;
+        logs.scrollTop = logs.scrollHeight;
+    }
 
-    const response = await fetch("http://localhost:5010/users/anonymous", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ displayName, vibe })
-    });
+    function getValue(id) {
+        return document.getElementById(id).value.trim();
+    }
 
-    const user = await response.json();
+    function setValue(id, value) {
+        document.getElementById(id).value = value || "";
+    }
 
-    document.getElementById("userId").value = user.userId;
+    async function createAnonymousUser() {
+        try {
+            const displayName = getValue("displayName");
+            const vibe = getValue("vibe");
 
-    log({
-        event: "AnonymousUserCreated",
-        data: user
-    });
-}
+            const response = await fetch(`${USER_SERVICE}/users/anonymous`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ displayName, vibe })
+            });
 
-async function connect() {
-    connection = new signalR.HubConnectionBuilder()
-        .withUrl("http://localhost:5005/chatHub")
-        .withAutomaticReconnect()
-        .build();
+            if (!response.ok) {
+                throw new Error(await response.text());
+            }
 
-    connection.on("Connected", data => {
-        log({ event: "Connected", data });
-    });
+            const user = await response.json();
+            setValue("userId", user.userId);
 
-    connection.on("WaitingForMatch", data => {
-        log({ event: "WaitingForMatch", data });
-    });
+            log({ event: "AnonymousUserCreated", data: user });
+        } catch (err) {
+            log({ event: "CreateUserError", error: err.toString() });
+        }
+    }
 
-    connection.on("MatchFound", async data => {
-        log({ event: "MatchFound", data });
+    async function connect() {
+        if (connection && connection.state === signalR.HubConnectionState.Connected) {
+            log("Already connected.");
+            return;
+        }
 
-        document.getElementById("roomId").value = data.roomId;
-        document.getElementById("partnerUserId").value = data.partnerUserId || "";
+        connection = new signalR.HubConnectionBuilder()
+            .withUrl(`${REALTIME_SERVICE}/chatHub`)
+            .withAutomaticReconnect()
+            .build();
 
-        await createPeerConnection();
+        connection.on("Connected", data => {
+            setValue("connectionId", data.connectionId);
+            log({ event: "Connected", data });
+        });
 
-        // Only the second matched user creates the offer.
-        isOfferCreator = true;
-        await createAndSendOffer();
-    });
+        connection.on("WaitingForMatch", data => {
+            log({ event: "WaitingForMatch", data });
+        });
 
-    connection.on("ReceiveMessage", data => {
-        log({ event: "ReceiveMessage", data });
-    });
+        connection.on("MatchFound", async data => {
+            log({ event: "MatchFound", data });
 
-    connection.on("ReceiveOffer", async data => {
-        log({ event: "ReceiveOffer" });
+            setValue("roomId", data.roomId);
+            setValue("partnerUserId", data.partnerUserId);
+            setValue("partnerConnectionId", data.partnerConnectionId);
 
-        await createPeerConnection();
+            await resetPeerConnectionOnly();
+            await createPeerConnection();
 
-        const offer = JSON.parse(data.offer);
+            const myConnectionId = getValue("connectionId");
+            const partnerConnectionId = getValue("partnerConnectionId");
 
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            // Prevent WebRTC offer collision.
+            // Only one side creates the offer, based on connectionId comparison.
+            if (myConnectionId > partnerConnectionId) {
+                await createAndSendOffer();
+            } else {
+                log("Waiting for partner offer.");
+            }
+        });
 
-        const answer = await peerConnection.createAnswer();
+        connection.on("ReceiveMessage", data => {
+            log({ event: "ReceiveMessage", data });
+        });
 
-        await peerConnection.setLocalDescription(answer);
+        connection.on("ReceiveOffer", async data => {
+            log({ event: "ReceiveOffer" });
 
-        const roomId = document.getElementById("roomId").value;
+            await createPeerConnection();
 
-        await connection.invoke("SendAnswer", roomId, JSON.stringify(answer));
-    });
+            const offer = JSON.parse(data.offer);
 
-    connection.on("ReceiveAnswer", async data => {
-        log({ event: "ReceiveAnswer" });
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
 
-        const answer = JSON.parse(data.answer);
+            await flushPendingIceCandidates();
 
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-    });
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
 
-    connection.on("ReceiveIceCandidate", async data => {
-        log({ event: "ReceiveIceCandidate" });
+            const roomId = getValue("roomId");
+            await connection.invoke("SendAnswer", roomId, JSON.stringify(answer));
 
-        const candidate = JSON.parse(data.candidate);
+            log("Answer sent.");
+        });
 
+        connection.on("ReceiveAnswer", async data => {
+            log({ event: "ReceiveAnswer" });
+
+            if (!peerConnection) {
+                log("No peer connection exists for answer.");
+                return;
+            }
+
+            const answer = JSON.parse(data.answer);
+
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+
+            await flushPendingIceCandidates();
+
+            log("Remote answer applied.");
+        });
+
+        connection.on("ReceiveIceCandidate", async data => {
+            const candidate = JSON.parse(data.candidate);
+
+            if (!peerConnection || !peerConnection.remoteDescription) {
+                pendingIceCandidates.push(candidate);
+                log("ICE candidate queued.");
+                return;
+            }
+
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            log("ICE candidate added.");
+        });
+
+        connection.on("PartnerLeft", data => {
+            log({ event: "PartnerLeft", data });
+            clearRoomState();
+            resetPeerConnectionOnly();
+            alert("Your partner left the room.");
+        });
+
+        connection.on("LeftRoom", data => {
+            log({ event: "LeftRoom", data });
+            clearRoomState();
+            resetPeerConnectionOnly();
+        });
+
+        connection.on("MatchError", data => {
+            log({ event: "MatchError", data });
+        });
+
+        connection.onclose(error => {
+            log({
+                event: "Disconnected",
+                error: error ? error.toString() : null
+            });
+            clearRoomState();
+            resetPeerConnectionOnly();
+        });
+
+        await connection.start();
+        log("SignalR connected successfully.");
+    }
+
+    async function startCamera() {
+        if (localStream) {
+            log("Camera already started.");
+            return;
+        }
+
+        localStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true
+        });
+
+        document.getElementById("localVideo").srcObject = localStream;
+
+        log("Camera started.");
+    }
+
+    async function createPeerConnection() {
         if (peerConnection) {
+            return;
+        }
+
+        if (!localStream) {
+            await startCamera();
+        }
+
+        peerConnection = new RTCPeerConnection({
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" }
+            ]
+        });
+
+        peerConnection.onicecandidate = async event => {
+            if (event.candidate) {
+                const roomId = getValue("roomId");
+
+                if (roomId && connection && connection.state === signalR.HubConnectionState.Connected) {
+                    await connection.invoke(
+                        "SendIceCandidate",
+                        roomId,
+                        JSON.stringify(event.candidate)
+                    );
+                }
+            }
+        };
+
+        peerConnection.ontrack = event => {
+            document.getElementById("remoteVideo").srcObject = event.streams[0];
+            log("Remote stream received.");
+        };
+
+        peerConnection.onconnectionstatechange = () => {
+            log({
+                event: "PeerConnectionState",
+                state: peerConnection.connectionState
+            });
+        };
+
+        localStream.getTracks().forEach(track => {
+            peerConnection.addTrack(track, localStream);
+        });
+
+        log("Peer connection created.");
+    }
+
+    async function createAndSendOffer() {
+        if (!peerConnection) {
+            await createPeerConnection();
+        }
+
+        const roomId = getValue("roomId");
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+
+        await connection.invoke("SendOffer", roomId, JSON.stringify(offer));
+
+        log("Offer sent.");
+    }
+
+    async function flushPendingIceCandidates() {
+        if (!peerConnection || !peerConnection.remoteDescription) {
+            return;
+        }
+
+        for (const candidate of pendingIceCandidates) {
             await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
         }
-    });
 
-    connection.on("PartnerLeft", data => {
-        log({ event: "PartnerLeft", data });
-        cleanupCall();
-        document.getElementById("roomId").value = "";
-        document.getElementById("partnerUserId").value = "";
-    });
-
-    connection.on("LeftRoom", data => {
-        log({ event: "LeftRoom", data });
-        cleanupCall();
-        document.getElementById("roomId").value = "";
-        document.getElementById("partnerUserId").value = "";
-    });
-
-    connection.on("MatchError", data => {
-        log({ event: "MatchError", data });
-    });
-
-    await connection.start();
-
-    log("SignalR connected successfully.");
-}
-
-async function startCamera() {
-    localStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-    });
-
-    document.getElementById("localVideo").srcObject = localStream;
-
-    log("Camera started.");
-}
-
-async function createPeerConnection() {
-    if (peerConnection) {
-        return;
-    }
-
-    peerConnection = new RTCPeerConnection({
-        iceServers: [
-            {
-                urls: "stun:stun.l.google.com:19302"
-            }
-        ]
-    });
-
-    peerConnection.onicecandidate = async event => {
-        if (event.candidate) {
-            const roomId = document.getElementById("roomId").value;
-
-            await connection.invoke(
-                "SendIceCandidate",
-                roomId,
-                JSON.stringify(event.candidate)
-            );
+        if (pendingIceCandidates.length > 0) {
+            log(`Flushed ${pendingIceCandidates.length} ICE candidates.`);
         }
-    };
 
-    peerConnection.ontrack = event => {
-        document.getElementById("remoteVideo").srcObject = event.streams[0];
-
-        log("Remote stream received.");
-    };
-
-    if (!localStream) {
-        await startCamera();
+        pendingIceCandidates = [];
     }
 
-    localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
-    });
+    async function startMatching() {
+        if (!connection || connection.state !== signalR.HubConnectionState.Connected) {
+            alert("Connect first.");
+            return;
+        }
 
-    log("Peer connection created.");
-}
+        const userId = getValue("userId");
+        const vibe = getValue("vibe");
 
-async function createAndSendOffer() {
-    const roomId = document.getElementById("roomId").value;
+        if (!userId) {
+            alert("Create anonymous user first.");
+            return;
+        }
 
-    const offer = await peerConnection.createOffer();
+        await resetPeerConnectionOnly();
+        clearRoomState(false);
 
-    await peerConnection.setLocalDescription(offer);
+        await connection.invoke("StartMatching", userId, vibe);
 
-    await connection.invoke("SendOffer", roomId, JSON.stringify(offer));
-
-    log("Offer sent.");
-}
-
-async function startMatching() {
-    const userId = document.getElementById("userId").value.trim();
-    const vibe = document.getElementById("vibe").value.trim();
-
-    if (!userId) {
-        alert("Create anonymous user first.");
-        return;
+        log("StartMatching invoked.");
     }
 
-    await connection.invoke("StartMatching", userId, vibe);
+    async function sendMessage() {
+        const roomId = getValue("roomId");
+        const userId = getValue("userId");
+        const message = getValue("message");
 
-    log("StartMatching invoked.");
-}
+        if (!roomId) {
+            alert("No active room.");
+            return;
+        }
 
-async function sendMessage() {
-    const roomId = document.getElementById("roomId").value.trim();
-    const userId = document.getElementById("userId").value.trim();
-    const message = document.getElementById("message").value.trim();
+        if (!message) {
+            return;
+        }
 
-    if (!roomId || !message) {
-        return;
+        await connection.invoke("SendMessage", roomId, userId, message);
+
+        setValue("message", "");
     }
 
-    await connection.invoke("SendMessage", roomId, userId, message);
+    async function leaveRoom() {
+        const roomId = getValue("roomId");
 
-    document.getElementById("message").value = "";
-}
+        if (!roomId) {
+            alert("No active room.");
+            return;
+        }
 
-async function leaveRoom() {
-    const roomId = document.getElementById("roomId").value.trim();
+        await connection.invoke("LeaveRoom", roomId);
 
-    if (!roomId) {
-        alert("No active room.");
-        return;
+        clearRoomState();
+        await resetPeerConnectionOnly();
+
+        log("LeaveRoom invoked.");
     }
 
-    await connection.invoke("LeaveRoom", roomId);
-}
+    async function reportUser() {
+        const roomId = getValue("roomId");
+        const reporterUserId = getValue("userId");
+        const reportedUserId = getValue("partnerUserId");
+        const reason = getValue("reportReason");
 
-async function reportUser() {
-    const roomId = document.getElementById("roomId").value.trim();
-    const reporterUserId = document.getElementById("userId").value.trim();
-    const reportedUserId = document.getElementById("partnerUserId").value.trim();
-    const reason = document.getElementById("reportReason").value;
+        if (!roomId || !reportedUserId) {
+            alert("No partner to report.");
+            return;
+        }
 
-    if (!roomId || !reportedUserId) {
-        alert("No partner to report.");
-        return;
+        const response = await fetch(`${MODERATION_SERVICE}/reports`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                roomId,
+                reporterUserId,
+                reportedUserId,
+                reason
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(await response.text());
+        }
+
+        const report = await response.json();
+
+        log({ event: "UserReported", data: report });
+        alert("Report submitted.");
     }
 
-    const response = await fetch("http://localhost:5012/reports", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            roomId,
-            reporterUserId,
-            reportedUserId,
-            reason
-            
-        })
-    });
+async function getPresenceSummary() {
+    try {
+        const response = await fetch(`${API}/presence/presence/summary`);
 
-    const report = await response.json();
+        if (!response.ok) {
+            throw new Error(await response.text());
+        }
 
-    log({
-        event: "UserReported",
-        data: report
-    });
+        const data = await response.json();
+
+        log({
+            event: "PresenceSummary",
+            data
+        });
+
+    } catch (err) {
+        log({
+            event: "PresenceSummaryError",
+            error: err.toString()
+        });
+    }
 }
 
-function cleanupCall() {
-    if (peerConnection) {
-        peerConnection.close();
-        peerConnection = null;
+async function getAnalyticsSummary() {
+    try {
+        const response = await fetch(`${API}/analytics/analytics/summary`);
+
+        if (!response.ok) {
+            throw new Error(await response.text());
+        }
+
+        const data = await response.json();
+
+        log({
+            event: "AnalyticsSummary",
+            data
+        });
+
+    } catch (err) {
+        log({
+            event: "AnalyticsSummaryError",
+            error: err.toString()
+        });
+    }
+}
+
+    function clearRoomState(clearPartner = true) {
+        setValue("roomId", "");
+
+        if (clearPartner) {
+            setValue("partnerUserId", "");
+            setValue("partnerConnectionId", "");
+        }
+
+        setValue("message", "");
+        document.getElementById("remoteVideo").srcObject = null;
     }
 
-    document.getElementById("remoteVideo").srcObject = null;
-}
+    async function resetPeerConnectionOnly() {
+        pendingIceCandidates = [];
+
+        if (peerConnection) {
+            peerConnection.onicecandidate = null;
+            peerConnection.ontrack = null;
+            peerConnection.onconnectionstatechange = null;
+
+            peerConnection.getSenders().forEach(sender => {
+                try {
+                    peerConnection.removeTrack(sender);
+                } catch {}
+            });
+
+            peerConnection.close();
+            peerConnection = null;
+        }
+
+        document.getElementById("remoteVideo").srcObject = null;
+
+        log("Peer connection reset.");
+    }
 </script>
 
 </body>

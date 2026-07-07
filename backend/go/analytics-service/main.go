@@ -7,8 +7,9 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sync"
 	"time"
+
+	"bucktuality/analytics-service/internal/kafkahelper"
 
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/gin-gonic/gin"
@@ -17,17 +18,17 @@ import (
 
 type MatchCreatedEvent struct {
 	EventType    string    `json:"EventType"`
-	RoomId       string    `json:"RoomId"`
-	User1Id      string    `json:"User1Id"`
-	User2Id      string    `json:"User2Id"`
+	RoomId      string    `json:"RoomId"`
+	User1Id     string    `json:"User1Id"`
+	User2Id     string    `json:"User2Id"`
 	CreatedAtUtc time.Time `json:"CreatedAtUtc"`
 }
 
 type MessageSentEvent struct {
 	EventType    string    `json:"EventType"`
-	RoomId       string    `json:"RoomId"`
-	SenderUserId string    `json:"SenderUserId"`
-	SentAtUtc    time.Time `json:"SentAtUtc"`
+	RoomId      string    `json:"RoomId"`
+	SenderUserId string   `json:"SenderUserId"`
+	SentAtUtc   time.Time `json:"SentAtUtc"`
 }
 
 type AnalyticsSummary struct {
@@ -36,17 +37,14 @@ type AnalyticsSummary struct {
 	UpdatedAtUtc  time.Time `json:"updatedAtUtc"`
 }
 
-var (
-	db *sql.DB
-	mu sync.Mutex
-)
+var db *sql.DB
 
 func main() {
 	kafkaBroker := getEnv("KAFKA_BROKER", "localhost:9092")
 
 	connectionString := getEnv(
 		"SQL_CONNECTION_STRING",
-		"sqlserver://sa:Bucktuality@12345@localhost:1433?database=BucktualityAnalyticsDb&encrypt=disable",
+		"sqlserver://sa:Bucktuality%4012345@localhost:1433?database=BucktualityAnalyticsDb&encrypt=disable",
 	)
 
 	db = connectSqlWithRetry(connectionString)
@@ -57,6 +55,7 @@ func main() {
 	go consumeMessageSent(ctx, kafkaBroker)
 
 	router := gin.Default()
+	router.Use(corsMiddleware())
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -81,134 +80,47 @@ func main() {
 	router.Run(":8083")
 }
 
-func createKafkaReader(topic string, groupID string, broker string) *kafka.Reader {
-
-	for {
-
-		reader := kafka.NewReader(kafka.ReaderConfig{
-			Brokers:     []string{broker},
-			Topic:       topic,
-			GroupID:     groupID,
-			StartOffset: kafka.FirstOffset,
-		})
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-
-		_, err := reader.ReadLag(ctx)
-
-		cancel()
-
-		if err == nil {
-
-			log.Printf("Connected to Kafka. Topic=%s\n", topic)
-
-			return reader
-		}
-
-		log.Printf("Kafka not ready for topic %s. Retrying in 5 seconds...\n", topic)
-
-		reader.Close()
-
-		time.Sleep(5 * time.Second)
-	}
-}
-
 func consumeMatchCreated(ctx context.Context, broker string) {
-	
-	reader := createKafkaReader(
-	"match-created",
-	"analytics-match-created-group",
-	broker,
-)
+	reader := kafkahelper.NewReader(
+		"match-created",
+		"analytics-match-created-group",
+		broker,
+	)
 
-	log.Println("Listening to topic: match-created")
-
-	for {
-		message, err := reader.ReadMessage(ctx)
-
-		if err != nil {
-
-			log.Println("Kafka connection lost:", err)
-
-			reader.Close()
-
-			reader = createKafkaReader(
-				"match-created",
-				"analytics-match-created-group",
-				broker,
-			)
-
-			continue
-		}
+	kafkahelper.ReadLoop(ctx, reader, "match-created", func(message kafka.Message) error {
+		log.Println("RAW match-created:", string(message.Value))
 
 		var event MatchCreatedEvent
 
 		if err := json.Unmarshal(message.Value, &event); err != nil {
-			log.Println("Invalid match-created event:", err)
-			continue
+			return err
 		}
 
-		err = incrementMatches()
-
-		if err != nil {
-			log.Println("Failed to update match analytics:", err)
-			continue
-		}
-
-		log.Printf("MatchCreated consumed and saved. RoomId=%s\n", event.RoomId)
-	}
+		return incrementMatches()
+	})
 }
 
 func consumeMessageSent(ctx context.Context, broker string) {
-	reader := createKafkaReader(
-	"message-sent",
-	"analytics-message-sent-group",
-	broker,
-)
-	log.Println("Listening to topic: message-sent")
+	reader := kafkahelper.NewReader(
+		"message-sent",
+		"analytics-message-sent-group",
+		broker,
+	)
 
-	for {
-		message, err := reader.ReadMessage(ctx)
+	kafkahelper.ReadLoop(ctx, reader, "message-sent", func(message kafka.Message) error {
+		log.Println("RAW message-sent:", string(message.Value))
 
-		if err != nil {
-
-			log.Println("Kafka connection lost:", err)
-
-			reader.Close()
-
-			reader = createKafkaReader(
-				"message-sent",
-				"analytics-message-sent-group",
-				broker,
-			)
-
-			continue
-		}
 		var event MessageSentEvent
 
 		if err := json.Unmarshal(message.Value, &event); err != nil {
-			log.Println("Invalid message-sent event:", err)
-			continue
+			return err
 		}
 
-		err = incrementMessages()
-
-		if err != nil {
-			log.Println("Failed to update message analytics:", err)
-			continue
-		}
-
-		log.Printf("MessageSent consumed and saved. RoomId=%s Sender=%s\n",
-			event.RoomId,
-			event.SenderUserId,
-		)
-	}
+		return incrementMessages()
+	})
 }
 
 func incrementMatches() error {
-	mu.Lock()
-	defer mu.Unlock()
-
 	_, err := db.Exec(`
 		UPDATE AnalyticsSummary
 		SET TotalMatches = TotalMatches + 1,
@@ -220,9 +132,6 @@ func incrementMatches() error {
 }
 
 func incrementMessages() error {
-	mu.Lock()
-	defer mu.Unlock()
-
 	_, err := db.Exec(`
 		UPDATE AnalyticsSummary
 		SET TotalMessages = TotalMessages + 1,
@@ -264,6 +173,21 @@ func connectSqlWithRetry(connectionString string) *sql.DB {
 
 		log.Println("SQL Server not ready, retrying in 5 seconds...")
 		time.Sleep(5 * time.Second)
+	}
+}
+
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
 	}
 }
 

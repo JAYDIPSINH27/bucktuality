@@ -127,6 +127,8 @@ services:
     depends_on:
       mssql:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
     restart: unless-stopped
 
   matchmaking-service:

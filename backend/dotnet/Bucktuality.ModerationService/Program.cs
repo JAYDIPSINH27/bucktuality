@@ -1,5 +1,6 @@
 using Bucktuality.ModerationService.Data;
 using Bucktuality.ModerationService.Models;
+using Bucktuality.ModerationService.Services;
 using Bucktuality.Shared.Contracts;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,6 +10,8 @@ builder.Services.AddDbContext<ModerationDbContext>(options =>
 {
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
 });
+
+builder.Services.AddSingleton<KafkaProducerService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -39,7 +42,8 @@ app.MapGet("/health", () => new
 
 app.MapPost("/reports", async (
     CreateReportRequest request,
-    ModerationDbContext db) =>
+    ModerationDbContext db,
+    KafkaProducerService kafkaProducer) =>
 {
     if (string.IsNullOrWhiteSpace(request.RoomId))
     {
@@ -73,6 +77,16 @@ app.MapPost("/reports", async (
 
     db.Reports.Add(report);
     await db.SaveChangesAsync();
+
+    await kafkaProducer.PublishAsync("user-reported", new UserReportedEvent
+    {
+        ReportId = report.Id.ToString(),
+        RoomId = report.RoomId,
+        ReporterUserId = report.ReporterUserId,
+        ReportedUserId = report.ReportedUserId,
+        Reason = report.Reason,
+        CreatedAtUtc = report.CreatedAtUtc
+    });
 
     return Results.Ok(new ReportResponse
     {

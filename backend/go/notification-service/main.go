@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"bucktuality/notification-service/internal/kafkahelper"
+
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/gin-gonic/gin"
 	"github.com/segmentio/kafka-go"
@@ -37,6 +39,16 @@ type MessageSentEvent struct {
 	SentAtUtc   time.Time `json:"SentAtUtc"`
 }
 
+type UserReportedEvent struct {
+	EventType      string    `json:"EventType"`
+	ReportId       string    `json:"ReportId"`
+	RoomId         string    `json:"RoomId"`
+	ReporterUserId string    `json:"ReporterUserId"`
+	ReportedUserId string    `json:"ReportedUserId"`
+	Reason         string    `json:"Reason"`
+	CreatedAtUtc   time.Time `json:"CreatedAtUtc"`
+}
+
 var db *sql.DB
 
 func main() {
@@ -53,6 +65,7 @@ func main() {
 
 	go consumeMatchCreated(ctx, kafkaBroker)
 	go consumeMessageSent(ctx, kafkaBroker)
+	go consumeUserReported(ctx, kafkaBroker)
 
 	router := gin.Default()
 	router.Use(corsMiddleware())
@@ -81,89 +94,75 @@ func main() {
 }
 
 func consumeMatchCreated(ctx context.Context, broker string) {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     []string{broker},
-		Topic:       "match-created",
-		GroupID:     "notification-match-created-sql-group-v1",
-		StartOffset: kafka.FirstOffset,
-	})
+	reader := kafkahelper.NewReader(
+		"match-created",
+		"notification-match-created-sql-group-v1",
+		broker,
+	)
 
-	log.Println("Notification service listening to match-created")
-
-	for {
-		message, err := reader.ReadMessage(ctx)
-
-		if err != nil {
-			log.Println("Error reading match-created:", err)
-			time.Sleep(3 * time.Second)
-			continue
-		}
-
-		log.Println("RAW match-created event:", string(message.Value))
+	kafkahelper.ReadLoop(ctx, reader, "match-created", func(message kafka.Message) error {
+		log.Println("RAW match-created:", string(message.Value))
 
 		var event MatchCreatedEvent
 
 		if err := json.Unmarshal(message.Value, &event); err != nil {
-			log.Println("Invalid match-created event:", err)
-			continue
+			return err
 		}
 
-		err = saveNotification(
+		return saveNotification(
 			"MatchCreated",
 			"New match created in room "+event.RoomId,
 			"match-created",
 		)
-
-		if err != nil {
-			log.Println("Failed to save MatchCreated notification:", err)
-			continue
-		}
-
-		log.Println("Saved MatchCreated notification:", event.RoomId)
-	}
+	})
 }
 
 func consumeMessageSent(ctx context.Context, broker string) {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     []string{broker},
-		Topic:       "message-sent",
-		GroupID:     "notification-message-sent-sql-group-v1",
-		StartOffset: kafka.FirstOffset,
-	})
+	reader := kafkahelper.NewReader(
+		"message-sent",
+		"notification-message-sent-sql-group-v1",
+		broker,
+	)
 
-	log.Println("Notification service listening to message-sent")
-
-	for {
-		message, err := reader.ReadMessage(ctx)
-
-		if err != nil {
-			log.Println("Error reading message-sent:", err)
-			time.Sleep(3 * time.Second)
-			continue
-		}
-
-		log.Println("RAW message-sent event:", string(message.Value))
+	kafkahelper.ReadLoop(ctx, reader, "message-sent", func(message kafka.Message) error {
+		log.Println("RAW message-sent:", string(message.Value))
 
 		var event MessageSentEvent
 
 		if err := json.Unmarshal(message.Value, &event); err != nil {
-			log.Println("Invalid message-sent event:", err)
-			continue
+			return err
 		}
 
-		err = saveNotification(
+		return saveNotification(
 			"MessageSent",
 			"Message sent in room "+event.RoomId,
 			"message-sent",
 		)
+	})
+}
 
-		if err != nil {
-			log.Println("Failed to save MessageSent notification:", err)
-			continue
+func consumeUserReported(ctx context.Context, broker string) {
+	reader := kafkahelper.NewReader(
+		"user-reported",
+		"notification-user-reported-sql-group-v1",
+		broker,
+	)
+
+	kafkahelper.ReadLoop(ctx, reader, "user-reported", func(message kafka.Message) error {
+		log.Println("RAW user-reported:", string(message.Value))
+
+		var event UserReportedEvent
+
+		if err := json.Unmarshal(message.Value, &event); err != nil {
+			return err
 		}
 
-		log.Println("Saved MessageSent notification:", event.RoomId)
-	}
+		return saveNotification(
+			"UserReported",
+			"User "+event.ReportedUserId+" was reported for "+event.Reason,
+			"user-reported",
+		)
+	})
 }
 
 func saveNotification(notificationType string, message string, sourceTopic string) error {

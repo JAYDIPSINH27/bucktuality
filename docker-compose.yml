@@ -73,6 +73,7 @@ services:
       - moderation-service
       - analytics-service
       - presence-service
+      - notification-service
 
   realtime-service:
     build:
@@ -172,6 +173,23 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+
+  notification-service:
+    build:
+      context: ./backend/go/notification-service
+      dockerfile: Dockerfile
+    container_name: bucktuality-notification-service
+    ports:
+      - "8085:8085"
+    environment:
+      KAFKA_BROKER: kafka:9092
+      SQL_CONNECTION_STRING: "sqlserver://sa:Bucktuality%4012345@mssql:1433?database=BucktualityNotificationsDb&encrypt=disable"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mssql:
+        condition: service_healthy
+    restart: unless-stopped   
 
 volumes:
   bucktuality-sql-data:

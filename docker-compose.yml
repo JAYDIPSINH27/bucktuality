@@ -74,6 +74,7 @@ services:
       - analytics-service
       - presence-service
       - notification-service
+      - ai-moderation-service
 
   realtime-service:
     build:
@@ -191,7 +192,21 @@ services:
         condition: service_healthy
       mssql:
         condition: service_healthy
-    restart: unless-stopped   
+    restart: unless-stopped  
+  
+  ai-moderation-service:
+    build:
+      context: ./backend/python/ai-moderation-service
+      dockerfile: Dockerfile
+    container_name: bucktuality-ai-moderation-service
+    ports:
+      - "8090:8090"
+    environment:
+      KAFKA_BROKER: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   bucktuality-sql-data:

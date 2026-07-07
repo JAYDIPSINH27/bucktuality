@@ -49,6 +49,17 @@ type UserReportedEvent struct {
 	CreatedAtUtc   time.Time `json:"CreatedAtUtc"`
 }
 
+type MessageFlaggedEvent struct {
+	EventType     string    `json:"EventType"`
+	RoomId       string    `json:"RoomId"`
+	SenderUserId string    `json:"SenderUserId"`
+	Message      string    `json:"Message"`
+	Category     string    `json:"Category"`
+	Confidence   float64   `json:"Confidence"`
+	Reason       string    `json:"Reason"`
+	CreatedAtUtc time.Time `json:"CreatedAtUtc"`
+}
+
 var db *sql.DB
 
 func main() {
@@ -66,6 +77,7 @@ func main() {
 	go consumeMatchCreated(ctx, kafkaBroker)
 	go consumeMessageSent(ctx, kafkaBroker)
 	go consumeUserReported(ctx, kafkaBroker)
+	go consumeMessageFlagged(ctx, kafkaBroker)
 
 	router := gin.Default()
 	router.Use(corsMiddleware())
@@ -161,6 +173,30 @@ func consumeUserReported(ctx context.Context, broker string) {
 			"UserReported",
 			"User "+event.ReportedUserId+" was reported for "+event.Reason,
 			"user-reported",
+		)
+	})
+}
+
+func consumeMessageFlagged(ctx context.Context, broker string) {
+	reader := kafkahelper.NewReader(
+		"message-flagged",
+		"notification-message-flagged-sql-group-v1",
+		broker,
+	)
+
+	kafkahelper.ReadLoop(ctx, reader, "message-flagged", func(message kafka.Message) error {
+		log.Println("RAW message-flagged:", string(message.Value))
+
+		var event MessageFlaggedEvent
+
+		if err := json.Unmarshal(message.Value, &event); err != nil {
+			return err
+		}
+
+		return saveNotification(
+			"MessageFlagged",
+			"Message flagged for "+event.Category+" in room "+event.RoomId,
+			"message-flagged",
 		)
 	})
 }

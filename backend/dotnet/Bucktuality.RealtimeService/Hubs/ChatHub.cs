@@ -234,6 +234,7 @@ public class ChatHub : Hub
         {
             RoomId = roomId,
             SenderUserId = userId,
+            Message = message,
             SentAtUtc = DateTime.UtcNow
         });
     }

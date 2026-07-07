@@ -47,7 +47,10 @@
 <button onclick="createAnonymousUser()">Create Anonymous User</button>
 <button onclick="connect()">Connect</button>
 <button onclick="startCamera()">Start Camera</button>
+<button onclick="toggleMic()">Toggle Mic</button>
+<button onclick="toggleCamera()">Toggle Camera</button>
 <button onclick="startMatching()">Start Matching</button>
+<button onclick="nextStranger()">Next Stranger</button>
 <button onclick="leaveRoom()">Leave Room</button>
 
 <hr>
@@ -103,6 +106,8 @@
     let localStream = null;
     let peerConnection = null;
     let pendingIceCandidates = [];
+    let micOn = true;
+    let cameraOn = true;
 
     function log(message) {
         const logs = document.getElementById("logs");
@@ -183,6 +188,13 @@
             } else {
                 log("Waiting for partner offer.");
             }
+        });
+
+        connection.on("PartnerMediaStatusChanged", data => {
+            log({
+                event: "PartnerMediaStatusChanged",
+                data
+            });
         });
 
         connection.on("ReceiveMessage", data => {
@@ -497,6 +509,83 @@ async function getAnalyticsSummary() {
             error: err.toString()
         });
     }
+}
+
+async function toggleMic() {
+    if (!localStream) {
+        await startCamera();
+    }
+
+    const audioTracks = localStream.getAudioTracks();
+
+    audioTracks.forEach(track => {
+        track.enabled = !track.enabled;
+        micOn = track.enabled;
+    });
+
+    await updateMediaStatus();
+
+    log({
+        event: "MicToggled",
+        micOn
+    });
+}
+
+async function toggleCamera() {
+    if (!localStream) {
+        await startCamera();
+    }
+
+    const videoTracks = localStream.getVideoTracks();
+
+    videoTracks.forEach(track => {
+        track.enabled = !track.enabled;
+        cameraOn = track.enabled;
+    });
+
+    await updateMediaStatus();
+
+    log({
+        event: "CameraToggled",
+        cameraOn
+    });
+}
+
+async function updateMediaStatus() {
+    if (!connection || connection.state !== signalR.HubConnectionState.Connected) {
+        return;
+    }
+
+    const userId = getValue("userId");
+    const roomId = getValue("roomId");
+
+    if (!userId) {
+        return;
+    }
+
+    await connection.invoke(
+        "UpdateMediaStatus",
+        userId,
+        roomId,
+        cameraOn,
+        micOn
+    );
+}
+
+async function nextStranger() {
+    const roomId = getValue("roomId");
+
+    if (roomId) {
+        await leaveRoom();
+    }
+
+    await resetPeerConnectionOnly();
+
+    clearRoomState();
+
+    setTimeout(async () => {
+        await startMatching();
+    }, 800);
 }
 
     function clearRoomState(clearPartner = true) {

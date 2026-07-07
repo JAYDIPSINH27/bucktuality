@@ -2,3 +2,5 @@ fastapi
 uvicorn
 kafka-python
 better-profanity
+transformers
+torch

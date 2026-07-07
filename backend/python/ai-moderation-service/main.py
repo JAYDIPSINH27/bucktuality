@@ -7,16 +7,18 @@ from datetime import datetime, timezone
 from better_profanity import profanity
 from fastapi import FastAPI
 from kafka import KafkaConsumer, KafkaProducer
+from transformers import pipeline
 
 
 app = FastAPI(title="Bucktuality AI Moderation Service")
 
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092")
 
-FLAGGED_TOPIC = "message-flagged"
 SOURCE_TOPIC = "message-sent"
+FLAGGED_TOPIC = "message-flagged"
 
 flagged_messages = []
+classifier = None
 
 
 BAD_KEYWORDS = [
@@ -24,12 +26,32 @@ BAD_KEYWORDS = [
     "i hate you",
     "stupid idiot",
     "die",
-    "terrorist",
 ]
 
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def load_model():
+    global classifier
+
+    while True:
+        try:
+            print("Loading AI moderation model...")
+
+            classifier = pipeline(
+                "text-classification",
+                model="unitary/toxic-bert",
+                top_k=None
+            )
+
+            print("AI moderation model loaded.")
+            return
+
+        except Exception as ex:
+            print(f"Model loading failed: {ex}")
+            time.sleep(10)
 
 
 def create_producer():
@@ -39,8 +61,10 @@ def create_producer():
                 bootstrap_servers=KAFKA_BROKER,
                 value_serializer=lambda v: json.dumps(v).encode("utf-8"),
             )
+
             print("Connected to Kafka producer.")
             return producer
+
         except Exception as ex:
             print(f"Kafka producer not ready: {ex}")
             time.sleep(5)
@@ -52,28 +76,25 @@ def create_consumer():
             consumer = KafkaConsumer(
                 SOURCE_TOPIC,
                 bootstrap_servers=KAFKA_BROKER,
-                group_id="ai-moderation-message-sent-group-v1",
+                group_id="ai-moderation-message-sent-group-v2",
                 auto_offset_reset="earliest",
                 enable_auto_commit=True,
                 value_deserializer=lambda m: json.loads(m.decode("utf-8")),
             )
+
             print("Connected to Kafka consumer.")
             return consumer
+
         except Exception as ex:
             print(f"Kafka consumer not ready: {ex}")
             time.sleep(5)
 
 
-def analyze_message(message: str):
+def analyze_with_rules(message: str):
     text = message.lower().strip()
 
     if not text:
-        return {
-            "isFlagged": False,
-            "category": "none",
-            "confidence": 0.0,
-            "reason": "Empty message",
-        }
+        return None
 
     if profanity.contains_profanity(text):
         return {
@@ -81,6 +102,7 @@ def analyze_message(message: str):
             "category": "profanity",
             "confidence": 0.85,
             "reason": "Profanity detected",
+            "model": "rules"
         }
 
     for keyword in BAD_KEYWORDS:
@@ -90,22 +112,58 @@ def analyze_message(message: str):
                 "category": "toxicity",
                 "confidence": 0.90,
                 "reason": f"Matched unsafe phrase: {keyword}",
+                "model": "rules"
             }
 
-    if len(text) > 300:
+    return None
+
+
+def analyze_with_model(message: str):
+    global classifier
+
+    if classifier is None:
+        return {
+            "isFlagged": False,
+            "category": "unknown",
+            "confidence": 0.0,
+            "reason": "Model not loaded",
+            "model": "none"
+        }
+
+    results = classifier(message[:512])
+
+    scores = results[0]
+
+    highest = max(scores, key=lambda x: x["score"])
+
+    label = highest["label"]
+    confidence = float(highest["score"])
+
+    if confidence >= 0.70:
         return {
             "isFlagged": True,
-            "category": "spam",
-            "confidence": 0.75,
-            "reason": "Message too long",
+            "category": label.lower(),
+            "confidence": confidence,
+            "reason": f"AI model detected {label}",
+            "model": "unitary/toxic-bert"
         }
 
     return {
         "isFlagged": False,
         "category": "safe",
-        "confidence": 0.10,
-        "reason": "No moderation issue detected",
+        "confidence": confidence,
+        "reason": "No serious issue detected",
+        "model": "unitary/toxic-bert"
     }
+
+
+def analyze_message(message: str):
+    rule_result = analyze_with_rules(message)
+
+    if rule_result is not None:
+        return rule_result
+
+    return analyze_with_model(message)
 
 
 def consume_messages():
@@ -132,6 +190,7 @@ def consume_messages():
             "Category": result["category"],
             "Confidence": result["confidence"],
             "Reason": result["reason"],
+            "Model": result["model"],
             "CreatedAtUtc": utc_now(),
         }
 
@@ -150,8 +209,11 @@ def consume_messages():
 def startup_event():
     profanity.load_censor_words()
 
-    thread = threading.Thread(target=consume_messages, daemon=True)
-    thread.start()
+    load_thread = threading.Thread(target=load_model, daemon=True)
+    load_thread.start()
+
+    consumer_thread = threading.Thread(target=consume_messages, daemon=True)
+    consumer_thread.start()
 
 
 @app.get("/health")
@@ -159,6 +221,7 @@ def health():
     return {
         "service": "ai-moderation-service",
         "status": "healthy",
+        "modelLoaded": classifier is not None,
     }
 
 

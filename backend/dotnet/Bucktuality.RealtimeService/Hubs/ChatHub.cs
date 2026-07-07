@@ -330,4 +330,35 @@ public class ChatHub : Hub
             candidate
         });
     }
+
+    public async Task UpdateMediaStatus(string userId, string roomId, bool cameraOn, bool micOn)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return;
+        }
+
+        var status = string.IsNullOrWhiteSpace(roomId) ? "online" : "in-call";
+
+        await _presenceClient.SetStatusAsync(new PresenceRequest
+        {
+            UserId = userId,
+            ConnectionId = Context.ConnectionId,
+            Status = status,
+            RoomId = roomId,
+            CameraOn = cameraOn,
+            MicOn = micOn
+        });
+
+        if (!string.IsNullOrWhiteSpace(roomId))
+        {
+            await Clients.OthersInGroup(roomId).SendAsync("PartnerMediaStatusChanged", new
+            {
+                userId,
+                cameraOn,
+                micOn
+            });
+        }
+    }
+
 }

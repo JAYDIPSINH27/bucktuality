@@ -361,4 +361,32 @@ public class ChatHub : Hub
         }
     }
 
+    public async Task TypingStarted(string roomId, string userId)
+    {
+        if (string.IsNullOrWhiteSpace(roomId))
+        {
+            return;
+        }
+
+        await Clients.OthersInGroup(roomId).SendAsync("PartnerTypingStarted", new
+        {
+            roomId,
+            userId
+        });
+    }
+
+    public async Task TypingStopped(string roomId, string userId)
+    {
+        if (string.IsNullOrWhiteSpace(roomId))
+        {
+            return;
+        }
+
+        await Clients.OthersInGroup(roomId).SendAsync("PartnerTypingStopped", new
+        {
+            roomId,
+            userId
+        });
+    }
+
 }

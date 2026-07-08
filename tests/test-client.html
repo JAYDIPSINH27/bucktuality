@@ -52,7 +52,8 @@
 <button onclick="startMatching()">Start Matching</button>
 <button onclick="nextStranger()">Next Stranger</button>
 <button onclick="leaveRoom()">Leave Room</button>
-
+<button onclick="startScreenShare()">Start Screen Share</button>
+<button onclick="stopScreenShare()">Stop Screen Share</button>
 <hr>
 
 <div>
@@ -66,9 +67,15 @@
 </div>
 
 <div>
-    <input id="message" placeholder="Type message" style="width:350px;">
+    <input
+    id="message"
+    placeholder="Type message"
+    style="width:350px;"
+    oninput="handleTyping()"
+>
     <button onclick="sendMessage()">Send</button>
 </div>
+<div id="typingStatus" style="margin: 8px; color: #666;"></div>
 
 <hr>
 
@@ -108,6 +115,11 @@
     let pendingIceCandidates = [];
     let micOn = true;
     let cameraOn = true;
+    let screenStream = null;
+    let originalVideoTrack = null;
+    let typingTimer = null;
+    let isTyping = false;
+    let partnerTypingClearTimer = null;
 
     function log(message) {
         const logs = document.getElementById("logs");
@@ -251,6 +263,30 @@
             log("ICE candidate added.");
         });
 
+        connection.on("PartnerTypingStarted", data => {
+            log({
+                event: "PartnerTypingStarted",
+                data
+            });
+
+            clearTimeout(partnerTypingClearTimer);
+
+            document.getElementById("typingStatus").textContent = "Partner is typing...";
+        });
+
+        connection.on("PartnerTypingStopped", data => {
+            log({
+                event: "PartnerTypingStopped",
+                data
+            });
+
+            clearTimeout(partnerTypingClearTimer);
+
+            partnerTypingClearTimer = setTimeout(() => {
+                document.getElementById("typingStatus").textContent = "";
+            }, 800);
+        });
+
         connection.on("PartnerLeft", data => {
             log({ event: "PartnerLeft", data });
             clearRoomState();
@@ -360,6 +396,78 @@
         log("Offer sent.");
     }
 
+    async function startScreenShare() {
+    if (!peerConnection) {
+        alert("You need to be in a call first.");
+        return;
+    }
+
+    try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: false
+        });
+
+        const screenTrack = screenStream.getVideoTracks()[0];
+
+        const sender = peerConnection
+            .getSenders()
+            .find(s => s.track && s.track.kind === "video");
+
+        if (!sender) {
+            alert("No video sender found.");
+            return;
+        }
+
+        if (localStream) {
+            originalVideoTrack = localStream.getVideoTracks()[0];
+        }
+
+        await sender.replaceTrack(screenTrack);
+
+        document.getElementById("localVideo").srcObject = screenStream;
+
+        screenTrack.onended = async () => {
+            await stopScreenShare();
+        };
+
+        log({
+            event: "ScreenShareStarted"
+        });
+
+    } catch (err) {
+        log({
+            event: "ScreenShareError",
+            error: err.toString()
+        });
+    }
+}
+
+    async function stopScreenShare() {
+        if (!peerConnection || !originalVideoTrack) {
+            return;
+        }
+
+        const sender = peerConnection
+            .getSenders()
+            .find(s => s.track && s.track.kind === "video");
+
+        if (sender) {
+            await sender.replaceTrack(originalVideoTrack);
+        }
+
+        if (screenStream) {
+            screenStream.getTracks().forEach(track => track.stop());
+            screenStream = null;
+        }
+
+        document.getElementById("localVideo").srcObject = localStream;
+
+        log({
+            event: "ScreenShareStopped"
+        });
+    }
+
     async function flushPendingIceCandidates() {
         if (!peerConnection || !peerConnection.remoteDescription) {
             return;
@@ -415,6 +523,9 @@
         await connection.invoke("SendMessage", roomId, userId, message);
 
         setValue("message", "");
+        isTyping = false;
+
+        await connection.invoke("TypingStopped", roomId, userId);
     }
 
     async function leaveRoom() {
@@ -603,6 +714,13 @@ async function nextStranger() {
     async function resetPeerConnectionOnly() {
         pendingIceCandidates = [];
 
+        if (screenStream) {
+            screenStream.getTracks().forEach(track => track.stop());
+            screenStream = null;
+        }
+
+        originalVideoTrack = null;
+
         if (peerConnection) {
             peerConnection.onicecandidate = null;
             peerConnection.ontrack = null;
@@ -622,6 +740,29 @@ async function nextStranger() {
 
         log("Peer connection reset.");
     }
+
+    async function handleTyping() {
+            const roomId = getValue("roomId");
+            const userId = getValue("userId");
+
+            if (!roomId || !connection || connection.state !== signalR.HubConnectionState.Connected) {
+                return;
+            }
+
+            if (!isTyping) {
+                isTyping = true;
+
+                await connection.invoke("TypingStarted", roomId, userId);
+            }
+
+            clearTimeout(typingTimer);
+
+            typingTimer = setTimeout(async () => {
+    isTyping = false;
+
+    await connection.invoke("TypingStopped", roomId, userId);
+}, 2500);
+        }
 </script>
 
 </body>

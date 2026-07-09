@@ -75,6 +75,7 @@ services:
       - presence-service
       - notification-service
       - ai-moderation-service
+      - admin-service
 
   realtime-service:
     build:
@@ -144,6 +145,26 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    restart: unless-stopped
+
+  admin-service:
+    build:
+      context: ./backend/dotnet
+      dockerfile: Bucktuality.AdminService/Dockerfile
+    container_name: bucktuality-admin-service
+    ports:
+      - "5013:5013"
+    depends_on:
+      analytics-service:
+        condition: service_started
+      presence-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      moderation-service:
+        condition: service_started
+      ai-moderation-service:
+        condition: service_started
     restart: unless-stopped
 
   analytics-service:

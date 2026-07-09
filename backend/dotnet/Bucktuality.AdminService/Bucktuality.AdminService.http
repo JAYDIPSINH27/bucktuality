@@ -1,0 +1,6 @@
+@Bucktuality.AdminService_HostAddress = http://localhost:5083
+
+GET {{Bucktuality.AdminService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

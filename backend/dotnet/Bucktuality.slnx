@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="Bucktuality.AdminService/Bucktuality.AdminService.csproj" />
   <Project Path="Bucktuality.Gateway/Bucktuality.Gateway.csproj" />
   <Project Path="Bucktuality.ModerationService/Bucktuality.ModerationService.csproj" />
   <Project Path="Bucktuality.RealtimeService/Bucktuality.RealtimeService.csproj" />

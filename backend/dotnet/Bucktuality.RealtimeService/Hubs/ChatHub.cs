@@ -349,7 +349,7 @@ public class ChatHub : Hub
             CameraOn = cameraOn,
             MicOn = micOn
         });
-
+    
         if (!string.IsNullOrWhiteSpace(roomId))
         {
             await Clients.OthersInGroup(roomId).SendAsync("PartnerMediaStatusChanged", new
@@ -360,6 +360,82 @@ public class ChatHub : Hub
             });
         }
     }
+
+    public async Task NextStranger(string userId, string vibe, string currentRoomId)
+{
+    if (!string.IsNullOrWhiteSpace(currentRoomId))
+    {
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, currentRoomId);
+
+        lock (ConnectionRooms)
+        {
+            ConnectionRooms.Remove(Context.ConnectionId);
+        }
+
+        await _matchmakingClient.LeaveMatchAsync(Context.ConnectionId, currentRoomId);
+        await _sessionClient.EndSessionAsync(currentRoomId);
+
+        await Clients.Group(currentRoomId).SendAsync("PartnerLeft", new
+        {
+            connectionId = Context.ConnectionId,
+            roomId = currentRoomId,
+            reason = "next-stranger"
+        });
+    }
+
+    await _presenceClient.SetStatusAsync(new PresenceRequest
+    {
+        UserId = userId,
+        ConnectionId = Context.ConnectionId,
+        Status = "waiting",
+        RoomId = "",
+        CameraOn = true,
+        MicOn = true
+    });
+
+    await StartMatching(userId, vibe);
+}
+
+    public async Task RequestIceRestart(string roomId)
+{
+    if (string.IsNullOrWhiteSpace(roomId))
+    {
+        return;
+    }
+
+    await Clients.OthersInGroup(roomId).SendAsync("IceRestartRequested", new
+    {
+        roomId
+    });
+}
+
+public async Task SendIceRestartOffer(string roomId, string offer)
+{
+    if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(offer))
+    {
+        return;
+    }
+
+    await Clients.OthersInGroup(roomId).SendAsync("ReceiveIceRestartOffer", new
+    {
+        roomId,
+        offer
+    });
+}
+
+public async Task SendIceRestartAnswer(string roomId, string answer)
+{
+    if (string.IsNullOrWhiteSpace(roomId) || string.IsNullOrWhiteSpace(answer))
+    {
+        return;
+    }
+
+    await Clients.OthersInGroup(roomId).SendAsync("ReceiveIceRestartAnswer", new
+    {
+        roomId,
+        answer
+    });
+}
 
     public async Task TypingStarted(string roomId, string userId)
     {

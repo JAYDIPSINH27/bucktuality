@@ -54,6 +54,7 @@
 <button onclick="leaveRoom()">Leave Room</button>
 <button onclick="startScreenShare()">Start Screen Share</button>
 <button onclick="stopScreenShare()">Stop Screen Share</button>
+<button onclick="restartIce()">Restart ICE</button>
 <hr>
 
 <div>
@@ -285,6 +286,50 @@
             partnerTypingClearTimer = setTimeout(() => {
                 document.getElementById("typingStatus").textContent = "";
             }, 800);
+        });
+
+        connection.on("IceRestartRequested", async data => {
+            log({
+                event: "IceRestartRequested",
+                data
+            });
+
+            await createIceRestartOffer();
+        });
+
+        connection.on("ReceiveIceRestartOffer", async data => {
+            log({
+                event: "ReceiveIceRestartOffer"
+            });
+
+            const offer = JSON.parse(data.offer);
+
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+
+            const roomId = getValue("roomId");
+
+            await connection.invoke(
+                "SendIceRestartAnswer",
+                roomId,
+                JSON.stringify(answer)
+            );
+
+            log("ICE restart answer sent.");
+        });
+
+        connection.on("ReceiveIceRestartAnswer", async data => {
+            log({
+                event: "ReceiveIceRestartAnswer"
+            });
+
+            const answer = JSON.parse(data.answer);
+
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+
+            log("ICE restart completed.");
         });
 
         connection.on("PartnerLeft", data => {
@@ -683,20 +728,75 @@ async function updateMediaStatus() {
     );
 }
 
-async function nextStranger() {
-    const roomId = getValue("roomId");
+    async function nextStranger() {
+        if (!connection || connection.state !== signalR.HubConnectionState.Connected) {
+            alert("Connect first.");
+            return;
+        }
 
-    if (roomId) {
-        await leaveRoom();
+        const userId = getValue("userId");
+        const vibe = getValue("vibe");
+        const currentRoomId = getValue("roomId");
+
+        if (!userId) {
+            alert("Create anonymous user first.");
+            return;
+        }
+
+        await resetPeerConnectionOnly();
+        clearRoomState();
+
+        await connection.invoke(
+            "NextStranger",
+            userId,
+            vibe,
+            currentRoomId
+        );
+
+        log({
+            event: "NextStrangerInvoked",
+            previousRoomId: currentRoomId
+        });
     }
 
-    await resetPeerConnectionOnly();
+    async function restartIce() {
+    const roomId = getValue("roomId");
 
-    clearRoomState();
+    if (!roomId) {
+        alert("No active room.");
+        return;
+    }
 
-    setTimeout(async () => {
-        await startMatching();
-    }, 800);
+    if (!peerConnection) {
+        alert("No peer connection.");
+        return;
+    }
+
+    await connection.invoke("RequestIceRestart", roomId);
+
+    log("ICE restart requested.");
+}
+
+async function createIceRestartOffer() {
+    if (!peerConnection) {
+        await createPeerConnection();
+    }
+
+    const roomId = getValue("roomId");
+
+    const offer = await peerConnection.createOffer({
+        iceRestart: true
+    });
+
+    await peerConnection.setLocalDescription(offer);
+
+    await connection.invoke(
+        "SendIceRestartOffer",
+        roomId,
+        JSON.stringify(offer)
+    );
+
+    log("ICE restart offer sent.");
 }
 
     function clearRoomState(clearPartner = true) {

@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mssql
+  namespace: bucktuality
+spec:
+  serviceName: mssql
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: mssql
+
+  template:
+    metadata:
+      labels:
+        app: mssql
+
+    spec:
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: sql
+              containerPort: 1433
+
+          env:
+            - name: ACCEPT_EULA
+              value: "Y"
+
+            - name: MSSQL_PID
+              value: "Developer"
+
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mssql-secret
+                  key: SA_PASSWORD
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+
+            limits:
+              cpu: "2"
+              memory: "3Gi"
+
+          readinessProbe:
+            tcpSocket:
+              port: 1433
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+
+          livenessProbe:
+            tcpSocket:
+              port: 1433
+            initialDelaySeconds: 90
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+
+          volumeMounts:
+            - name: mssql-data
+              mountPath: /var/opt/mssql
+
+      volumes:
+        - name: mssql-data
+          persistentVolumeClaim:
+            claimName: mssql-pvc

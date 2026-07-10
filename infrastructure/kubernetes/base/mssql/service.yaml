@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mssql
+  namespace: bucktuality
+spec:
+  type: ClusterIP
+
+  selector:
+    app: mssql
+
+  ports:
+    - name: sql
+      port: 1433
+      targetPort: 1433

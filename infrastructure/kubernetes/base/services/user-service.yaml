@@ -21,7 +21,7 @@ spec:
 
       containers:
         - name: user-service
-          image: jpsinh27/bucktuality-user-service:v1
+          image: jpsinh27/bucktuality-user-service:latest
           imagePullPolicy: Always
 
           ports:

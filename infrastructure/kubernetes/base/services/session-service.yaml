@@ -24,7 +24,7 @@ spec:
 
       containers:
         - name: session-service
-          image: jpsinh27/bucktuality-session-service:v1
+          image: jpsinh27/bucktuality-session-service:latest
           imagePullPolicy: Always
 
           ports:

@@ -24,7 +24,7 @@ spec:
 
       containers:
         - name: moderation-service
-          image: jpsinh27/bucktuality-moderation-service:v1
+          image: jpsinh27/bucktuality-moderation-service:latest
           imagePullPolicy: Always
 
           ports:

@@ -8,7 +8,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<ModerationDbContext>(options =>
 {
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnection"));
 });
 
 builder.Services.AddSingleton<KafkaProducerService>();
@@ -29,6 +30,8 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+await ApplyMigrationsWithRetryAsync(app);
+
 app.UseCors();
 
 app.UseSwagger();
@@ -47,22 +50,34 @@ app.MapPost("/reports", async (
 {
     if (string.IsNullOrWhiteSpace(request.RoomId))
     {
-        return Results.BadRequest("RoomId is required.");
+        return Results.BadRequest(new
+        {
+            message = "RoomId is required."
+        });
     }
 
     if (string.IsNullOrWhiteSpace(request.ReporterUserId))
     {
-        return Results.BadRequest("ReporterUserId is required.");
+        return Results.BadRequest(new
+        {
+            message = "ReporterUserId is required."
+        });
     }
 
     if (string.IsNullOrWhiteSpace(request.ReportedUserId))
     {
-        return Results.BadRequest("ReportedUserId is required.");
+        return Results.BadRequest(new
+        {
+            message = "ReportedUserId is required."
+        });
     }
 
     if (string.IsNullOrWhiteSpace(request.Reason))
     {
-        return Results.BadRequest("Reason is required.");
+        return Results.BadRequest(new
+        {
+            message = "Reason is required."
+        });
     }
 
     var report = new Report
@@ -78,6 +93,11 @@ app.MapPost("/reports", async (
     db.Reports.Add(report);
     await db.SaveChangesAsync();
 
+    /*
+     * This publish attempt may fail until Kafka is deployed in Kubernetes.
+     * KafkaProducerService already catches and logs the failure, so the
+     * report remains saved successfully in SQL Server.
+     */
     await kafkaProducer.PublishAsync("user-reported", new UserReportedEvent
     {
         ReportId = report.Id.ToString(),
@@ -102,7 +122,7 @@ app.MapPost("/reports", async (
 app.MapGet("/reports", async (ModerationDbContext db) =>
 {
     var reports = await db.Reports
-        .OrderByDescending(x => x.CreatedAtUtc)
+        .OrderByDescending(report => report.CreatedAtUtc)
         .Take(100)
         .ToListAsync();
 
@@ -114,11 +134,60 @@ app.MapGet("/reports/user/{userId}", async (
     ModerationDbContext db) =>
 {
     var reports = await db.Reports
-        .Where(x => x.ReportedUserId == userId)
-        .OrderByDescending(x => x.CreatedAtUtc)
+        .Where(report => report.ReportedUserId == userId)
+        .OrderByDescending(report => report.CreatedAtUtc)
         .ToListAsync();
 
     return Results.Ok(reports);
 });
 
 app.Run();
+
+static async Task ApplyMigrationsWithRetryAsync(
+    WebApplication app,
+    int maximumAttempts = 12)
+{
+    Exception? lastException = null;
+
+    for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+    {
+        try
+        {
+            await using var scope = app.Services.CreateAsyncScope();
+
+            var db = scope.ServiceProvider
+                .GetRequiredService<ModerationDbContext>();
+
+            app.Logger.LogInformation(
+                "Applying Moderation Service migrations. Attempt {Attempt}/{MaximumAttempts}",
+                attempt,
+                maximumAttempts);
+
+            await db.Database.MigrateAsync();
+
+            app.Logger.LogInformation(
+                "Moderation Service database migrations completed.");
+
+            return;
+        }
+        catch (Exception exception)
+        {
+            lastException = exception;
+
+            if (attempt == maximumAttempts)
+            {
+                break;
+            }
+
+            app.Logger.LogWarning(
+                exception,
+                "Moderation database unavailable. Retrying in 5 seconds.");
+
+            await Task.Delay(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    throw new InvalidOperationException(
+        "Moderation Service could not apply database migrations.",
+        lastException);
+}

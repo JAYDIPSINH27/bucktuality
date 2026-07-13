@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: moderation-service
+  namespace: bucktuality
+  labels:
+    app: moderation-service
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: moderation-service
+
+  template:
+    metadata:
+      labels:
+        app: moderation-service
+
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+
+      containers:
+        - name: moderation-service
+          image: jpsinh27/bucktuality-moderation-service:v1
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 5012
+
+          env:
+            - name: ASPNETCORE_URLS
+              value: "http://+:5012"
+
+            - name: ASPNETCORE_ENVIRONMENT
+              value: "Production"
+
+            - name: ConnectionStrings__DefaultConnection
+              valueFrom:
+                secretKeyRef:
+                  name: moderation-service-secret
+                  key: connection-string
+
+            - name: Kafka__BootstrapServers
+              value: "kafka:9092"
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5012
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5012
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5012
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: moderation-service
+  namespace: bucktuality
+  labels:
+    app: moderation-service
+
+spec:
+  type: ClusterIP
+
+  selector:
+    app: moderation-service
+
+  ports:
+    - name: http
+      port: 5012
+      targetPort: 5012

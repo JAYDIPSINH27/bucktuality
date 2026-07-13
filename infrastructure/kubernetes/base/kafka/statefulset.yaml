@@ -1,0 +1,145 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: bucktuality
+  labels:
+    app: kafka
+
+spec:
+  serviceName: kafka-headless
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: kafka
+
+  template:
+    metadata:
+      labels:
+        app: kafka
+
+    spec:
+      terminationGracePeriodSeconds: 60
+
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+
+      containers:
+        - name: kafka
+          image: apache/kafka:4.1.2
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: broker
+              containerPort: 9092
+
+            - name: controller
+              containerPort: 9093
+
+          env:
+            # A stable identifier for this Kafka cluster.
+            # Do not change it after Kafka has written data.
+            - name: CLUSTER_ID
+              value: "MkU3OEVBNTcwNTJENDM2Qk"
+
+            # This single node acts as both broker and controller.
+            - name: KAFKA_NODE_ID
+              value: "1"
+
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+
+            # Kafka accepts application traffic on 9092
+            # and KRaft controller traffic on 9093.
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://:9092,CONTROLLER://:9093"
+
+            # Other Kubernetes pods connect using kafka:9092.
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://kafka:9092"
+
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "PLAINTEXT"
+
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: >-
+                1@kafka-0.kafka-headless.bucktuality.svc.cluster.local:9093
+
+            # Single-broker development settings.
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: "1"
+
+            - name: KAFKA_MIN_INSYNC_REPLICAS
+              value: "1"
+
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+
+            # Store topic data and KRaft metadata on the PVC.
+            - name: KAFKA_LOG_DIRS
+              value: "/var/lib/kafka/data"
+
+            # Keep logs for seven days in this local lab.
+            - name: KAFKA_LOG_RETENTION_HOURS
+              value: "168"
+
+            # Reduce JVM memory use for your VM-based cluster.
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms512m -Xmx1g"
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "1Gi"
+
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+
+          startupProbe:
+            tcpSocket:
+              port: 9092
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 36
+
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 5
+
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+
+      volumes:
+        - name: kafka-data
+          persistentVolumeClaim:
+            claimName: kafka-pvc

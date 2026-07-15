@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-moderation-service
+  namespace: bucktuality
+  labels:
+    app: ai-moderation-service
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: ai-moderation-service
+
+  strategy:
+    type: Recreate
+
+  template:
+    metadata:
+      labels:
+        app: ai-moderation-service
+
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+
+      containers:
+        - name: ai-moderation-service
+          image: jpsinh27/bucktuality-ai-moderation-service:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 8090
+
+          env:
+            - name: KAFKA_BROKER
+              value: "kafka:9092"
+
+            - name: HF_HOME
+              value: "/huggingface-cache"
+
+            - name: TOKENIZERS_PARALLELISM
+              value: "false"
+
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "1Gi"
+
+            limits:
+              cpu: "1"
+              memory: "3Gi"
+
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 8090
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8090
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+          volumeMounts:
+            - name: huggingface-cache
+              mountPath: /huggingface-cache
+
+      volumes:
+        - name: huggingface-cache
+          emptyDir:
+            sizeLimit: 2Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-moderation-service
+  namespace: bucktuality
+  labels:
+    app: ai-moderation-service
+
+spec:
+  type: ClusterIP
+
+  selector:
+    app: ai-moderation-service
+
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090

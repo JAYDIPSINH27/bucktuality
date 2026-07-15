@@ -8,7 +8,7 @@ from better_profanity import profanity
 from fastapi import FastAPI
 from kafka import KafkaConsumer, KafkaProducer
 from transformers import pipeline
-
+from fastapi import HTTPException
 
 app = FastAPI(title="Bucktuality AI Moderation Service")
 
@@ -220,10 +220,23 @@ def startup_event():
 def health():
     return {
         "service": "ai-moderation-service",
-        "status": "healthy",
-        "modelLoaded": classifier is not None,
+        "status": "healthy" if model_loaded else "starting",
+        "modelLoaded": model_loaded,
     }
 
+@app.get("/ready")
+def ready():
+    if classifier is None:
+        raise HTTPException(
+            status_code=503,
+            detail="AI moderation model is still loading",
+        )
+
+    return {
+        "service": "ai-moderation-service",
+        "status": "ready",
+        "modelLoaded": True,
+    }
 
 @app.get("/moderation/flagged")
 def get_flagged_messages():

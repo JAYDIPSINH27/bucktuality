@@ -218,11 +218,14 @@ def startup_event():
 
 @app.get("/health")
 def health():
+    model_loaded = classifier is not None
+
     return {
         "service": "ai-moderation-service",
         "status": "healthy" if model_loaded else "starting",
         "modelLoaded": model_loaded,
     }
+
 
 @app.get("/ready")
 def ready():

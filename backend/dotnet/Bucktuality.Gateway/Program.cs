@@ -1,31 +1,31 @@
-using Yarp.ReverseProxy;
-
 var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.AddReverseProxy()
-    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
 builder.Services.AddCors(options =>
 {
-    options.AddDefaultPolicy(policy =>
+    options.AddPolicy("Frontend", policy =>
     {
         policy
             .AllowAnyHeader()
             .AllowAnyMethod()
-            .AllowCredentials()
-            .SetIsOriginAllowed(_ => true);
+            .SetIsOriginAllowed(_ => true)
+            .AllowCredentials();
     });
 });
 
+builder.Services
+    .AddReverseProxy()
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+
 var app = builder.Build();
 
-app.UseCors();
+app.UseCors("Frontend");
 
-app.MapGet("/health", () => new
+app.MapGet("/health", () => Results.Ok(new
 {
     service = "gateway",
-    status = "healthy"
-});
+    status = "healthy",
+    timestampUtc = DateTime.UtcNow
+}));
 
 app.MapReverseProxy();
 

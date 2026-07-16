@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: realtime-service
+  namespace: bucktuality
+  labels:
+    app: realtime-service
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: realtime-service
+
+  strategy:
+    type: Recreate
+
+  template:
+    metadata:
+      labels:
+        app: realtime-service
+
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+
+      containers:
+        - name: realtime-service
+          image: jpsinh27/bucktuality-realtime-service:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 5005
+
+          env:
+            - name: ASPNETCORE_URLS
+              value: "http://+:5005"
+
+            - name: ASPNETCORE_ENVIRONMENT
+              value: "Production"
+
+            - name: Services__Matchmaking
+              value: "http://matchmaking-service:8081"
+
+            - name: Services__Session
+              value: "http://session-service:5011"
+
+            - name: Services__Presence
+              value: "http://presence-service:8084"
+
+            - name: Kafka__BootstrapServers
+              value: "kafka:9092"
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: realtime-service
+  namespace: bucktuality
+  labels:
+    app: realtime-service
+
+spec:
+  type: ClusterIP
+
+  selector:
+    app: realtime-service
+
+  ports:
+    - name: http
+      port: 5005
+      targetPort: 5005

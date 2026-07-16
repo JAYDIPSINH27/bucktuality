@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-service
+  namespace: bucktuality
+  labels:
+    app: admin-service
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: admin-service
+
+  template:
+    metadata:
+      labels:
+        app: admin-service
+
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+
+      containers:
+        - name: admin-service
+          image: jpsinh27/bucktuality-admin-service:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 5013
+
+          env:
+            - name: ASPNETCORE_URLS
+              value: "http://+:5013"
+
+            - name: ASPNETCORE_ENVIRONMENT
+              value: "Production"
+
+            - name: Services__Analytics
+              value: "http://analytics-service:8083"
+
+            - name: Services__Presence
+              value: "http://presence-service:8084"
+
+            - name: Services__Notifications
+              value: "http://notification-service:8085"
+
+            - name: Services__Moderation
+              value: "http://moderation-service:5012"
+
+            - name: Services__AiModeration
+              value: "http://ai-moderation-service:8090"
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5013
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5013
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5013
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-service
+  namespace: bucktuality
+  labels:
+    app: admin-service
+
+spec:
+  type: ClusterIP
+
+  selector:
+    app: admin-service
+
+  ports:
+    - name: http
+      port: 5013
+      targetPort: 5013

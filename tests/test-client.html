@@ -103,12 +103,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
 
 <script>
-    const USER_SERVICE = "http://localhost:5010";
-    const REALTIME_SERVICE = "http://localhost:5005";
-    const MODERATION_SERVICE = "http://localhost:5012";
-    const PRESENCE_SERVICE = "http://localhost:8084";
-    const ANALYTICS_SERVICE = "http://localhost:8083";
-    const API = "http://localhost:5000";
+    // Single external entry point for every backend service.
+    const GATEWAY_URL = "http://192.168.60.11:31000";
 
     let connection = null;
     let localStream = null;
@@ -142,7 +138,7 @@
             const displayName = getValue("displayName");
             const vibe = getValue("vibe");
 
-            const response = await fetch(`${USER_SERVICE}/users/anonymous`, {
+            const response = await fetch(`${GATEWAY_URL}/api/users/anonymous`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ displayName, vibe })
@@ -168,7 +164,7 @@
         }
 
         connection = new signalR.HubConnectionBuilder()
-            .withUrl(`${REALTIME_SERVICE}/chatHub`)
+            .withUrl(`${GATEWAY_URL}/chatHub`)
             .withAutomaticReconnect()
             .build();
 
@@ -600,7 +596,7 @@
             return;
         }
 
-        const response = await fetch(`${MODERATION_SERVICE}/reports`, {
+        const response = await fetch(`${GATEWAY_URL}/reports/reports`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -623,7 +619,7 @@
 
 async function getPresenceSummary() {
     try {
-        const response = await fetch(`${API}/presence/presence/summary`);
+        const response = await fetch(`${GATEWAY_URL}/presence/presence/summary`);
 
         if (!response.ok) {
             throw new Error(await response.text());
@@ -646,7 +642,7 @@ async function getPresenceSummary() {
 
 async function getAnalyticsSummary() {
     try {
-        const response = await fetch(`${API}/analytics/analytics/summary`);
+        const response = await fetch(`${GATEWAY_URL}/analytics/analytics/summary`);
 
         if (!response.ok) {
             throw new Error(await response.text());

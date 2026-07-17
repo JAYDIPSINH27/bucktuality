@@ -72,6 +72,25 @@ spec:
             failureThreshold: 3
 
 ---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: gateway
+#   namespace: bucktuality
+#   labels:
+#     app: gateway
+
+# spec:
+#   type: NodePort
+
+#   selector:
+#     app: gateway
+
+#   ports:
+#     - name: http
+#       port: 5000
+#       targetPort: 5000
+#       nodePort: 31000
 apiVersion: v1
 kind: Service
 metadata:
@@ -81,7 +100,7 @@ metadata:
     app: gateway
 
 spec:
-  type: NodePort
+  type: ClusterIP
 
   selector:
     app: gateway
@@ -90,4 +109,3 @@ spec:
     - name: http
       port: 5000
       targetPort: 5000
-      nodePort: 31000

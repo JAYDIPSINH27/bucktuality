@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Namespace
+  - namespace/namespace.yaml
+
+  # Persistent storage
+  - storage/kafka/pv.yaml
+  - storage/kafka/pvc.yaml
+  - storage/mssql/pv.yaml
+  - storage/mssql/pvc.yaml
+
+  # Infrastructure
+  - redis/redis.yaml
+  - kafka/services.yaml
+  - kafka/statefulset.yaml
+  - mssql/service.yaml
+  - mssql/statefulset.yaml
+
+  # Application services
+  - services/user-service.yaml
+  - services/session-service.yaml
+  - services/matchmaking-service.yaml
+  - services/realtime-service.yaml
+  - services/presence-service.yaml
+  - services/analytics-service.yaml
+  - services/notification-service.yaml
+  - services/moderation-service.yaml
+  - services/ai-moderation-service.yaml
+  - services/admin-service.yaml
+  - services/gateway.yaml
+
+  # External routing
+  - ingress/gateway-ingress.yaml

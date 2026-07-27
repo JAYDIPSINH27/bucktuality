@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: bucktuality
+spec:
+  template:
+    spec:
+      containers:
+        - name: notification-service
+          envFrom:
+            - configMapRef:
+                name: notification-service-config

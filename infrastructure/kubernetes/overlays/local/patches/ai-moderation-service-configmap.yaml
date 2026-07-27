@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-moderation-service
+  namespace: bucktuality
+spec:
+  template:
+    spec:
+      containers:
+        - name: ai-moderation-service
+          envFrom:
+            - configMapRef:
+                name: ai-moderation-service-config

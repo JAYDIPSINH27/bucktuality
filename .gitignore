@@ -56,3 +56,8 @@ CodeCoverage/
 TestResult.xml
 nunit-*.xml
 infrastructure/kubernetes/backup/
+
+# Kubernetes local configuration and generated secrets
+infrastructure/kubernetes/overlays/local/*.secret.env
+infrastructure/kubernetes/overlays/local/secrets/
+infrastructure/kubernetes/backup/

@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: bucktuality
+spec:
+  template:
+    spec:
+      containers:
+        - name: user-service
+          envFrom:
+            - configMapRef:
+                name: user-service-config

@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matchmaking-service
+  namespace: bucktuality
+spec:
+  template:
+    spec:
+      containers:
+        - name: matchmaking-service
+          envFrom:
+            - configMapRef:
+                name: matchmaking-service-config
